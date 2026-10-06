@@ -110,7 +110,7 @@ export struct NodesPage {
           this.nodeList()
         }
         .width('100%')
-        .padding({ left: 20, right: 20, top: 12, bottom: 28 })
+        .padding({ left: 20, right: 20, top: 12, bottom: 180 })
       }
     }
     .width('100%')

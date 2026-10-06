@@ -33,7 +33,7 @@ export struct DiagnosticsPage {
         this.boundary()
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 16, bottom: 28 })
+      .padding({ left: 20, right: 20, top: 16, bottom: 180 })
     }
     }
     .width('100%')
@@ -98,8 +98,8 @@ export struct DiagnosticsPage {
     }
     .width('100%')
     Row({ space: 8 }) {
-      this.stat('走代理连接', this.coreRunning ? '' + this.proxyConnections : '—')
-      this.stat('代理流量', this.coreRunning ? Fmt.bytes(this.downTotal + this.upTotal) : '—')
+      this.stat('走加速连接', this.coreRunning ? '' + this.proxyConnections : '—')
+      this.stat('加速流量', this.coreRunning ? Fmt.bytes(this.downTotal + this.upTotal) : '—')
     }
     .width('100%')
   }

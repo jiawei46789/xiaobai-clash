@@ -44,7 +44,7 @@ export struct ConnectionsPage {
         this.list()
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 16, bottom: 28 })
+      .padding({ left: 20, right: 20, top: 16, bottom: 180 })
     }
     }
     .width('100%')
@@ -57,8 +57,8 @@ export struct ConnectionsPage {
   private summary() {
     Row({ space: 8 }) {
       this.summaryCell('活跃连接', this.connected ? '' + this.coreConnections.length : '—')
-      this.summaryCell('其中走代理', this.connected ? '' + this.proxiedCount() : '—')
-      this.summaryCell('代理总流量', this.connected ? Fmt.bytes(this.totalBytes()) : '—')
+      this.summaryCell('其中走加速', this.connected ? '' + this.proxiedCount() : '—')
+      this.summaryCell('加速总流量', this.connected ? Fmt.bytes(this.totalBytes()) : '—')
     }
     .width('100%')
   }
@@ -155,7 +155,7 @@ export struct ConnectionsPage {
     if (conn.chains.length > 0) {
       return conn.chains[conn.chains.length - 1];
     }
-    return '代理';
+    return '加速';
   }
 
   @Builder

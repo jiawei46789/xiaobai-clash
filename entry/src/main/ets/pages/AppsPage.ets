@@ -138,7 +138,7 @@ export struct AppsPage {
           }
         }
         .width('100%')
-        .padding({ left: 20, right: 20, top: 16, bottom: 28 })
+        .padding({ left: 20, right: 20, top: 16, bottom: 180 })
       }
     }
     .width('100%')
@@ -151,11 +151,11 @@ export struct AppsPage {
     Column({ space: 10 }) {
       Row() {
         Column({ space: 3 }) {
-          Text('分应用代理')
+          Text('分应用加速')
             .fontSize(14)
             .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text'))
-          Text('控制哪些应用使用代理')
+          Text('控制哪些应用使用加速')
             .fontSize(10)
             .fontColor($r('app.color.muted'))
         }
@@ -170,7 +170,7 @@ export struct AppsPage {
       }
       .width('100%')
 
-      Text('开关打开 = 使用代理，关闭 = 不使用代理（直连）。')
+      Text('开关打开 = 使用加速，关闭 = 不使用加速（直连）。')
         .fontSize(10)
         .fontColor($r('app.color.sub'))
         .width('100%')

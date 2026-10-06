@@ -1,6 +1,7 @@
 import { ContentFrame } from '../common/ContentFrame';
 import { AppSettings, SubscriptionProfile } from '../models/ArkModels';
 import { pasteboard } from '@kit.BasicServicesKit';
+import { bundleManager } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
 
 /** 反馈 QQ 群（应用内可见常量，随仓库公开） */
@@ -212,21 +213,17 @@ export struct SettingsPage {
         this.aboutGroup()
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 16, bottom: 28 })
+      .padding({ left: 20, right: 20, top: 16, bottom: 180 })
     }
     }
     .width('100%')
     .height('100%')
     .scrollBar(BarState.Off)
-    .bindSheet($$this.showTip, this.tipSheet(), {
-      detents: [SheetSize.MEDIUM, SheetSize.LARGE],
-      backgroundColor: $r('app.color.surface'),
-      title: { title: '打赏支持' }
-    })
   }
 
+  /** 打赏内联卡片：bindSheet 挂在 Scroll 上会干扰滚动高度测量（设置页滚不到底），改为内容流内展开 */
   @Builder
-  private tipSheet() {
+  private tipCard() {
     Column({ space: 14 }) {
       Text('微信扫一扫，请开发者喝杯奶茶')
         .fontSize(13)
@@ -580,14 +577,19 @@ export struct SettingsPage {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      Button('管理')
-        .type(ButtonType.Normal)
-        .fontSize(12)
-        .fontColor($r('app.color.blue'))
     }
     .width('100%')
     .padding({ left: 14, right: 14, top: 10, bottom: 10 })
     .border({ width: 1, color: $r('app.color.line_soft') })
+  }
+
+  /** 动态读自身版本号，避免硬编码字符串随版本更新过期 */
+  private appVersion(): string {
+    try {
+      return bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT).versionName;
+    } catch (_err) {
+      return '1.6.12';
+    }
   }
 
   @Builder
@@ -644,7 +646,7 @@ export struct SettingsPage {
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
-          Button('去打赏')
+          Button(this.showTip ? '收起' : '去打赏')
             .type(ButtonType.Normal)
             .fontSize(12)
             .fontColor($r('app.color.green'))
@@ -652,12 +654,16 @@ export struct SettingsPage {
             .borderRadius(6)
             .height(30)
             .onClick(() => {
-              this.showTip = true;
+              this.showTip = !this.showTip;
             })
         }
         .width('100%')
         .padding({ left: 14, right: 14, top: 10, bottom: 10 })
         .border({ width: 1, color: $r('app.color.line_soft') })
+
+        if (this.showTip) {
+          this.tipCard()
+        }
       }
       .width('100%')
       .borderRadius(8)
@@ -679,7 +685,7 @@ export struct SettingsPage {
         .width('100%')
         .margin({ bottom: 8 })
       Column({ space: 0 }) {
-        this.infoRow('版本', 'xiaobai-clash v1.6.10')
+        this.infoRow('版本', 'xiaobai-clash v' + this.appVersion())
         this.infoRow('目标系统', 'HarmonyOS API 24+')
       }
       .width('100%')
@@ -687,14 +693,8 @@ export struct SettingsPage {
       .backgroundColor($r('app.color.surface'))
       .border({ width: 1, color: $r('app.color.line_soft') })
       .clip(true)
-
-      // 合规声明（用户要求，2026-10-06）：固定展示在「关于」底部
-      Text('注意事项：禁止将本应用用于违法犯罪、攻击入侵、诈骗、侵权、传播违法信息或绕过法律法规监管等用途；仅供个人在自己拥有和控制的设备上学习与研究使用。')
-        .fontSize(10)
-        .fontColor($r('app.color.muted'))
-        .textAlign(TextAlign.Start)
-        .width('100%')
-        .padding({ left: 4, right: 4, top: 8 })
+      // 合规声明已按用户要求改放连接页横幅（HomePage.noticeBanner），
+      // 此处副本删除：它同时是「设置页滚不到底」的布局问题元素。
     }
     .width('100%')
     .margin({ top: 8 })

@@ -31,7 +31,7 @@ export struct RulesPage {
         this.list()
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 16, bottom: 28 })
+      .padding({ left: 20, right: 20, top: 16, bottom: 180 })
     }
     }
     .width('100%')
@@ -43,7 +43,7 @@ export struct RulesPage {
   private summary() {
     Row({ space: 8 }) {
       this.summaryCell('规则总数', this.rules.length.toString())
-      this.summaryCell('代理', this.proxyCount().toString())
+      this.summaryCell('加速', this.proxyCount().toString())
       this.summaryCell('直连 / 拒绝', this.directCount().toString())
     }
     .width('100%')

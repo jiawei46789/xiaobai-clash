@@ -28,7 +28,7 @@ export struct OnboardingPage {
         this.navigation()
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 16, bottom: 28 })
+      .padding({ left: 20, right: 20, top: 16, bottom: 180 })
     }
     }
     .width('100%')
