@@ -1,5 +1,10 @@
 import { ContentFrame } from '../common/ContentFrame';
 import { AppSettings, SubscriptionProfile } from '../models/ArkModels';
+import { pasteboard } from '@kit.BasicServicesKit';
+import { promptAction } from '@kit.ArkUI';
+
+/** 反馈 QQ 群（应用内可见常量，随仓库公开） */
+const QQ_GROUP: string = '719544620';
 
 /** 订阅管理行：独立子组件，保证 @Prop 变化能实时刷新（@Builder 按值传参不会刷新） */
 @Component
@@ -174,6 +179,7 @@ export struct SettingsPage {
 
   @State private showSubManager: boolean = false;
   @State private showConfigDetail: boolean = false;
+  @State private showTip: boolean = false;
 
   @State private localAutoConnect: boolean = true;
   @State private localDarkMode: boolean = true;
@@ -202,6 +208,7 @@ export struct SettingsPage {
         this.settingGroup('连接行为')
         this.coreGroup()
         this.dataGroup()
+        this.supportGroup()
         this.aboutGroup()
       }
       .width('100%')
@@ -211,6 +218,43 @@ export struct SettingsPage {
     .width('100%')
     .height('100%')
     .scrollBar(BarState.Off)
+    .bindSheet($$this.showTip, this.tipSheet(), {
+      detents: [SheetSize.MEDIUM, SheetSize.LARGE],
+      backgroundColor: $r('app.color.surface'),
+      title: { title: '打赏支持' }
+    })
+  }
+
+  @Builder
+  private tipSheet() {
+    Column({ space: 14 }) {
+      Text('微信扫一扫，请开发者喝杯奶茶')
+        .fontSize(13)
+        .fontColor($r('app.color.text'))
+      Image($r('app.media.tip_qr'))
+        .width(240)
+        .height(240)
+        .objectFit(ImageFit.Contain)
+        .borderRadius(10)
+      Text('自愿打赏，与软件功能无关；感谢支持开源')
+        .fontSize(11)
+        .fontColor($r('app.color.muted'))
+        .textAlign(TextAlign.Center)
+      Button('关闭')
+        .type(ButtonType.Normal)
+        .fontSize(12)
+        .fontColor($r('app.color.sub'))
+        .backgroundColor($r('app.color.surface2'))
+        .borderRadius(8)
+        .height(36)
+        .width('60%')
+        .onClick(() => {
+          this.showTip = false;
+        })
+    }
+    .width('100%')
+    .padding({ left: 20, right: 20, top: 8, bottom: 24 })
+    .alignItems(HorizontalAlign.Center)
   }
 
   @Builder
@@ -297,7 +341,7 @@ export struct SettingsPage {
       Column({ space: 0 }) {
         Row() {
           Column({ space: 3 }) {
-            Text('代理核心')
+            Text('加速核心')
               .fontSize(12)
               .fontColor($r('app.color.text'))
             Text('sing-box / libbox 内嵌')
@@ -544,6 +588,85 @@ export struct SettingsPage {
     .width('100%')
     .padding({ left: 14, right: 14, top: 10, bottom: 10 })
     .border({ width: 1, color: $r('app.color.line_soft') })
+  }
+
+  @Builder
+  private supportGroup() {
+    Column({ space: 0 }) {
+      Text('支持与反馈')
+        .fontSize(12)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.sub'))
+        .width('100%')
+        .margin({ bottom: 8 })
+      Column({ space: 0 }) {
+        Row() {
+          Column({ space: 3 }) {
+            Text('加入反馈 QQ 群')
+              .fontSize(12)
+              .fontColor($r('app.color.text'))
+            Text('问题反馈 / 使用交流：' + QQ_GROUP)
+              .fontSize(10)
+              .fontColor($r('app.color.muted'))
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          Button('复制群号')
+            .type(ButtonType.Normal)
+            .fontSize(12)
+            .fontColor($r('app.color.blue'))
+            .backgroundColor($r('app.color.blue_soft'))
+            .borderRadius(6)
+            .height(30)
+            .onClick(() => {
+              const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, QQ_GROUP);
+              pasteboard.getSystemPasteboard().setData(data)
+                .then(() => {
+                  promptAction.showToast({ message: '群号已复制：' + QQ_GROUP });
+                })
+                .catch(() => {
+                  promptAction.showToast({ message: '复制失败，群号：' + QQ_GROUP });
+                });
+            })
+        }
+        .width('100%')
+        .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+        .border({ width: 1, color: $r('app.color.line_soft') })
+
+        Row() {
+          Column({ space: 3 }) {
+            Text('打赏支持')
+              .fontSize(12)
+              .fontColor($r('app.color.text'))
+            Text('喜欢这个应用，请开发者喝杯奶茶（微信收款码）')
+              .fontSize(10)
+              .fontColor($r('app.color.muted'))
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          Button('去打赏')
+            .type(ButtonType.Normal)
+            .fontSize(12)
+            .fontColor($r('app.color.green'))
+            .backgroundColor($r('app.color.green_soft'))
+            .borderRadius(6)
+            .height(30)
+            .onClick(() => {
+              this.showTip = true;
+            })
+        }
+        .width('100%')
+        .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+        .border({ width: 1, color: $r('app.color.line_soft') })
+      }
+      .width('100%')
+      .borderRadius(8)
+      .backgroundColor($r('app.color.surface'))
+      .border({ width: 1, color: $r('app.color.line_soft') })
+      .clip(true)
+    }
+    .width('100%')
+    .margin({ top: 8 })
   }
 
   @Builder
