@@ -1,0 +1,17 @@
+@entry/build/
+.hvigor/
+oh_modules/
+node_modules/
+local.properties
+pc-side/traffic-log/
+*.p12
+*.p7b
+*.cer
+*.csr
+signConfig*.json
+build-log*.txt
+_tmp/
+
+.cxx/
+.cxx
+

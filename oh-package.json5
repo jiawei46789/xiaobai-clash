@@ -1,0 +1,8 @@
+{
+  "modelVersion": "26.0.0",
+  "name": "xiaobai-clash",
+  "version": "1.6.0",
+  "description": "HarmonyOS native mihomo VPN client with local traffic sink (fork of LIAN CONNECT, GPL-3.0)",
+  "dependencies": {},
+  "devDependencies": {}
+}
