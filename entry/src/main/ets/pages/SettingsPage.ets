@@ -679,14 +679,22 @@ export struct SettingsPage {
         .width('100%')
         .margin({ bottom: 8 })
       Column({ space: 0 }) {
-        this.infoRow('版本', 'LIAN CONNECT v0.02 测试版')
-        this.infoRow('目标系统', 'HarmonyOS API 22+')
+        this.infoRow('版本', 'xiaobai-clash v1.6.10')
+        this.infoRow('目标系统', 'HarmonyOS API 24+')
       }
       .width('100%')
       .borderRadius(8)
       .backgroundColor($r('app.color.surface'))
       .border({ width: 1, color: $r('app.color.line_soft') })
       .clip(true)
+
+      // 合规声明（用户要求，2026-10-06）：固定展示在「关于」底部
+      Text('注意事项：禁止将本应用用于违法犯罪、攻击入侵、诈骗、侵权、传播违法信息或绕过法律法规监管等用途；仅供个人在自己拥有和控制的设备上学习与研究使用。')
+        .fontSize(10)
+        .fontColor($r('app.color.muted'))
+        .textAlign(TextAlign.Start)
+        .width('100%')
+        .padding({ left: 4, right: 4, top: 8 })
     }
     .width('100%')
     .margin({ top: 8 })
