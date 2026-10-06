@@ -179,6 +179,7 @@ export struct HomePage {
     Scroll() {
       ContentFrame() {
       Column({ space: 14 }) {
+        this.noticeBanner()
         this.hero()
         this.metrics()
         this.health()
@@ -193,6 +194,25 @@ export struct HomePage {
     .height('100%')
     .scrollBar(BarState.Off)
     .align(Alignment.Top)
+  }
+
+  /** 合规横幅（用户要求 2026-10-06）：常驻连接页顶部，不可关闭 */
+  @Builder
+  private noticeBanner() {
+    Row({ space: 8 }) {
+      Text('⚠')
+        .fontSize(13)
+        .fontColor($r('app.color.amber'))
+      Text('禁止将本应用用于违法犯罪、攻击入侵、诈骗、侵权、传播违法信息或绕过法律法规监管；仅供个人在自己拥有和控制的设备上学习研究使用')
+        .fontSize(10)
+        .fontColor($r('app.color.text'))
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .padding({ left: 12, right: 12, top: 9, bottom: 9 })
+    .borderRadius(8)
+    .backgroundColor($r('app.color.amber_soft'))
+    .border({ width: 1, color: $r('app.color.amber') })
   }
 
   /** 隧道是否真的通（核心存活 + 健康探测未失败） */
