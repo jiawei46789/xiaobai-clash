@@ -134,6 +134,8 @@ struct Index {
   /** 定时更新订阅：秒级 tick 累计 + 并发防抖 */
   private subUpdateTick: number = 0;
   private subUpdating: boolean = false;
+  /** 连接期自动测速：秒级 tick（用户要求 1.6.19：VPN 连接后每 10 秒测全部节点） */
+  private nodeTestTick: number = 0;
   @State private subUpdateMinutes: number = 0;
   /** 最近一次读到有效心跳的时间 */
   private coreLastSeen: number = 0;
@@ -532,6 +534,12 @@ struct Index {
       this.subUpdateTick++;
       if (this.subUpdateTick % 60 === 0) {
         this.checkSubUpdateDue();
+      }
+      // 连接期间每 10 秒触发一次全节点测速；上一轮未完（testingAll）则跳过，
+      // 避免测速任务叠加打满控制端口与带宽。
+      this.nodeTestTick++;
+      if (this.connected && this.nodeTestTick % 10 === 0 && !this.testingAll) {
+        this.testAllNodes(true);
       }
     }, 1000);
   }
@@ -1394,7 +1402,14 @@ struct Index {
     return undefined;
   }
 
-  private async testAllNodes(): Promise<void> {
+  /**
+   * 全部节点测速。auto=true 为连接期自动轮（用户要求 1.6.19）：
+   * 静默模式，不占用/覆盖状态栏文案，仅记 hilog；已有测速在跑时直接跳过。
+   */
+  private async testAllNodes(auto: boolean = false): Promise<void> {
+    if (this.testingAll) {
+      return;
+    }
     const all: ProxyNode[] = [];
     this.nodeGroups.forEach((group: ProxyGroup) => {
       group.nodes.forEach((node: ProxyNode) => {
@@ -1402,11 +1417,17 @@ struct Index {
       });
     });
     if (all.length === 0) {
-      this.statusMessage = '暂无节点可测速';
+      if (!auto) {
+        this.statusMessage = '暂无节点可测速';
+      }
       return;
     }
     this.testingAll = true;
-    this.statusMessage = '正在测速 ' + all.length + ' 个节点...';
+    if (auto) {
+      hilog.info(DOMAIN, TAG, 'auto node latency test start count=%{public}d', all.length);
+    } else {
+      this.statusMessage = '正在测速 ' + all.length + ' 个节点...';
+    }
     // 测速结果先累积，批量刷新状态：逐条更新会让长列表持续全量重渲染（卡顿主因）
     const pending = new Map<string, number>();
     let flushing = false;
@@ -1454,7 +1475,11 @@ struct Index {
         flush();
         await new Promise<void>((resolve) => setTimeout(resolve, 120));
       }
-      this.statusMessage = '全部节点测速完成';
+      if (!auto) {
+        this.statusMessage = '全部节点测速完成';
+      } else {
+        hilog.info(DOMAIN, TAG, 'auto node latency test done');
+      }
     } finally {
       this.testingAll = false;
     }
