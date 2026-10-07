@@ -130,6 +130,10 @@ struct Index {
   private vpnService: VpnService = new VpnService();
   private coreStatusStore?: CoreStatusStore;
   private statsTimer: number = -1;
+  /** 定时更新订阅：秒级 tick 累计 + 并发防抖 */
+  private subUpdateTick: number = 0;
+  private subUpdating: boolean = false;
+  @State private subUpdateMinutes: number = 0;
   /** 最近一次读到有效心跳的时间 */
   private coreLastSeen: number = 0;
   /** 首次基线读取完成标记（避免启动时把“已在运行”误记为新连接事件） */
@@ -186,6 +190,7 @@ struct Index {
     this.notificationOn = settings.notificationOn;
     this.logLevel = settings.logLevel;
     this.testUrl = settings.testUrl;
+    this.subUpdateMinutes = settings.subUpdateMinutes;
     this.dnsMode = settings.dnsMode;
     this.proxyMode = settings.proxyMode;
     this.perAppProxyEnabled = settings.perAppProxyEnabled;
@@ -479,6 +484,7 @@ struct Index {
         dnsMode: this.dnsMode,
         proxyMode: this.proxyMode,
         perAppProxyEnabled: this.perAppProxyEnabled,
+        subUpdateMinutes: this.subUpdateMinutes,
         onSave: (settings: AppSettings): void => {
           this.saveSettings(settings);
         },
@@ -514,8 +520,15 @@ struct Index {
       return;
     }
     this.refreshCoreStatus();
+    // 启动/回前台先补一次定时订阅检查（可能上次运行期间已到期）
+    this.checkSubUpdateDue();
     this.statsTimer = setInterval(() => {
       this.refreshCoreStatus();
+      // 每分钟检查一次定时更新订阅
+      this.subUpdateTick++;
+      if (this.subUpdateTick % 60 === 0) {
+        this.checkSubUpdateDue();
+      }
     }, 1000);
   }
 
@@ -795,6 +808,36 @@ struct Index {
   }
 
   /** 刷新指定订阅：重新下载并原地更新 */
+  /**
+   * 定时更新订阅（用户要求，1.6.17）：subUpdateMinutes>0 且距当前订阅
+   * updatedAt 超过间隔时，自动复用手动刷新链路（拉取→重建配置→重载核心）。
+   * 定时器只在前台存活，所以启动/回前台会先补检一次。
+   */
+  private checkSubUpdateDue(): void {
+    if (this.subUpdateMinutes <= 0 || this.subUpdating || this.subService === undefined) {
+      return;
+    }
+    const active = this.subService.getActive();
+    if (active === null || active === undefined) {
+      return;
+    }
+    const lastMs: number = Date.parse(active.updatedAt);
+    const dueMs: number = this.subUpdateMinutes * 60000;
+    const stale: boolean = Number.isNaN(lastMs) || (Date.now() - lastMs) >= dueMs;
+    if (!stale) {
+      return;
+    }
+    this.subUpdating = true;
+    this.pushEvent('定时刷新订阅', active.name + ' · 间隔 ' + this.subUpdateMinutes + ' 分钟', 'info');
+    this.refreshSubscriptionById(active.id)
+      .then((): void => {
+        this.subUpdating = false;
+      })
+      .catch((): void => {
+        this.subUpdating = false;
+      });
+  }
+
   private async refreshSubscriptionById(id: string): Promise<void> {
     if (this.subService === undefined) {
       return;
@@ -916,7 +959,8 @@ struct Index {
         logLevel: current.logLevel,
         testUrl: current.testUrl,
         perAppProxyEnabled: current.perAppProxyEnabled,
-        darkMode: current.darkMode
+        darkMode: current.darkMode,
+        subUpdateMinutes: current.subUpdateMinutes
       };
       this.settingsStore.save(updated);
     }
@@ -1432,6 +1476,7 @@ struct Index {
     this.notificationOn = settings.notificationOn;
     this.logLevel = settings.logLevel;
     this.testUrl = settings.testUrl;
+    this.subUpdateMinutes = settings.subUpdateMinutes;
     // 只在主题真的变了时才 setColorMode：配置变更会重建 UI 树，
     // 重复触发会把 Toggle 旧参数重新下发形成「开关弹回」乒乓。
     const modeChanged: boolean = this.darkMode !== settings.darkMode;
@@ -1481,7 +1526,8 @@ struct Index {
         logLevel: current.logLevel,
         testUrl: current.testUrl,
         perAppProxyEnabled: value,
-        darkMode: current.darkMode
+        darkMode: current.darkMode,
+        subUpdateMinutes: current.subUpdateMinutes
       };
       this.settingsStore.save(updated);
     }

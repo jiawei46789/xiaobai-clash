@@ -85,6 +85,9 @@ export interface AppSettings {
   perAppProxyEnabled: boolean;
   /** 深色模式：true 强制深色配色，false 强制浅色（资源限定词 base/dark 切换） */
   darkMode: boolean;
+  /** 定时更新订阅：间隔分钟数（0=关闭，有效范围 1-10080）。
+   * 应用存活期间到点自动刷新当前订阅；回前台/启动时补检一次 */
+  subUpdateMinutes: number;
 }
 
 /**

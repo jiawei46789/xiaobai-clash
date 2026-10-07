@@ -156,6 +156,8 @@ export struct SettingsPage {
   @Prop dnsMode: string = '智能';
   @Prop proxyMode: string = '规则';
   @Prop perAppProxyEnabled: boolean = false;
+  /** 定时更新订阅间隔分钟数（0=关闭），用户要求自定义间隔（1.6.17） */
+  @Prop subUpdateMinutes: number = 0;
   onSave: (settings: AppSettings) => void = () => {
   };
   onTestConnection: () => void = () => {
@@ -185,6 +187,9 @@ export struct SettingsPage {
   @State private localAutoConnect: boolean = true;
   @State private localDarkMode: boolean = true;
   @State private localNetworkRecover: boolean = true;
+  /** 定时更新订阅：本地镜像 + 自定义分钟输入草稿 */
+  @State private localSubUpdateMinutes: number = 0;
+  @State private subUpdateDraft: string = '';
   @State private localScreenKeep: boolean = true;
   @State private localFailClosed: boolean = false;
   @State private localNotificationOn: boolean = true;
@@ -200,6 +205,8 @@ export struct SettingsPage {
     this.localNotificationOn = this.notificationOn;
     this.localLogLevel = this.logLevel;
     this.localTestUrl = this.testUrl;
+    this.localSubUpdateMinutes = this.subUpdateMinutes;
+    this.subUpdateDraft = this.subUpdateMinutes > 0 ? '' + this.subUpdateMinutes : '';
   }
 
   build() {
@@ -389,6 +396,65 @@ export struct SettingsPage {
       .backgroundColor($r('app.color.surface'))
       .border({ width: 1, color: $r('app.color.line_soft') })
       .clip(true)
+
+      Text('定时更新订阅')
+        .fontSize(11)
+        .fontColor($r('app.color.sub'))
+        .width('100%')
+        .margin({ top: 12, bottom: 6 })
+      Row({ space: 6 }) {
+        ForEach(this.subUpdatePresets(), (preset: number) => {
+          Text(this.subUpdatePresetLabel(preset))
+            .fontSize(11)
+            .fontColor(this.localSubUpdateMinutes === preset ? Color.White : $r('app.color.sub'))
+            .backgroundColor(this.localSubUpdateMinutes === preset ? $r('app.color.blue') : $r('app.color.surface2'))
+            .borderRadius(999)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.localSubUpdateMinutes = preset;
+              this.subUpdateDraft = preset > 0 ? '' + preset : '';
+              this.save();
+            })
+        }, (preset: number) => 'subupd-' + preset)
+      }
+      .width('100%')
+      Row({ space: 8 }) {
+        TextInput({ placeholder: '自定义分钟数（1-10080）', text: this.subUpdateDraft })
+          .type(InputType.Number)
+          .height(40)
+          .fontSize(12)
+          .fontColor($r('app.color.text'))
+          .placeholderColor($r('app.color.muted'))
+          .backgroundColor($r('app.color.surface'))
+          .border({ width: 1, color: $r('app.color.line_soft') })
+          .borderRadius(8)
+          .layoutWeight(1)
+          .onChange((value: string) => {
+            this.subUpdateDraft = value;
+          })
+        Button('应用')
+          .type(ButtonType.Normal)
+          .fontSize(12)
+          .fontColor($r('app.color.green'))
+          .backgroundColor($r('app.color.green_soft'))
+          .borderRadius(8)
+          .height(40)
+          .onClick(() => {
+            const n = parseInt(this.subUpdateDraft, 10);
+            if (Number.isNaN(n) || n < 1) {
+              return;
+            }
+            this.localSubUpdateMinutes = Math.min(n, 10080);
+            this.save();
+          })
+      }
+      .width('100%')
+      .margin({ top: 8 })
+      Text(this.subUpdateHint())
+        .fontSize(10)
+        .fontColor($r('app.color.muted'))
+        .width('100%')
+        .margin({ top: 6 })
 
       Text('延迟测试地址')
         .fontSize(11)
@@ -725,6 +791,29 @@ export struct SettingsPage {
     .border({ width: 1, color: $r('app.color.line_soft') })
   }
 
+  private subUpdatePresets(): number[] {
+    return [0, 60, 360, 720, 1440];
+  }
+
+  private subUpdatePresetLabel(m: number): string {
+    if (m === 0) {
+      return '关闭';
+    }
+    if (m % 60 === 0) {
+      const h = m / 60;
+      return h === 1 ? '1 小时' : h + ' 小时';
+    }
+    return m + ' 分钟';
+  }
+
+  private subUpdateHint(): string {
+    if (this.localSubUpdateMinutes <= 0) {
+      return '已关闭。开启后应用前台运行期间到点自动刷新当前订阅；后台/息屏定时器可能被系统挂起，回到前台或下次启动时补刷一次。';
+    }
+    return '当前：每 ' + this.subUpdatePresetLabel(this.localSubUpdateMinutes)
+      + ' 自动刷新当前订阅。刷新会重建配置并重载核心，已连接时短暂闪断属预期。';
+  }
+
   private buildSettings(): AppSettings {
     return {
       autoConnect: this.localAutoConnect,
@@ -737,7 +826,8 @@ export struct SettingsPage {
       logLevel: this.localLogLevel,
       testUrl: this.localTestUrl,
       perAppProxyEnabled: this.perAppProxyEnabled,
-      darkMode: this.localDarkMode
+      darkMode: this.localDarkMode,
+      subUpdateMinutes: this.localSubUpdateMinutes
     };
   }
 
