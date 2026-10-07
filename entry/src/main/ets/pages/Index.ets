@@ -1,4 +1,6 @@
-import { common, ConfigurationConstant } from '@kit.AbilityKit';
+import { common, ConfigurationConstant, bundleManager } from '@kit.AbilityKit';
+import { pasteboard, deviceInfo } from '@kit.BasicServicesKit';
+import { picker, fileIo as fs } from '@kit.CoreFileKit';
 import {
   AppConnection,
   AppProxyRule,
@@ -432,11 +434,15 @@ struct Index {
         onExport: (): void => {
           this.exportReport();
         },
+        onExportDiagnostics: (): void => {
+          this.exportDiagnostics();
+        },
         onCopy: (): void => {
-          this.statusMessage = '诊断日志已复制到剪贴板';
+          this.copyDiagLog();
         },
         onClear: (): void => {
-          this.events = [];
+          this.recoveryEvents = [];
+          this.statusMessage = '诊断记录已清空';
         }
       })
     } else if (this.selectedPage === 'settings') {
@@ -1480,7 +1486,7 @@ struct Index {
       this.settingsStore.save(updated);
     }
     this.syncAppFilterToFile();
-    this.pushEvent('分应用代理', value ? '已启用' : '已关闭', 'info');
+    this.pushEvent('分应用加速', value ? '已启用' : '已关闭', 'info');
     this.statusMessage = value
       ? (this.connected ? '已启用，重新连接后生效' : '已启用')
       : '已关闭';
@@ -1505,7 +1511,7 @@ struct Index {
     this.excludedApps = next;
     this.settingsStore?.saveExcludedApps(next);
     this.syncAppFilterToFile();
-    this.statusMessage = proxyOn ? '已设为使用代理' : '已设为不使用代理（直连）';
+    this.statusMessage = proxyOn ? '已设为使用加速' : '已设为不使用加速（直连）';
   }
 
   /** 手动添加自定义应用；返回 false 表示已存在（UI 据此提示） */
@@ -1539,7 +1545,129 @@ struct Index {
   }
 
   private exportReport(): void {
-    this.statusMessage = '诊断报告已导出';
+    this.saveTextFile('xiaobai-report-' + this.fileStamp() + '.md', this.reportText(), '流量报告已导出');
+  }
+
+  private exportDiagnostics(): void {
+    this.saveTextFile('xiaobai-diagnostics-' + this.fileStamp() + '.txt', this.diagnosticsText(), '诊断包已导出');
+  }
+
+  private copyDiagLog(): void {
+    const text = 'xiaobai-clash 诊断日志 · ' + this.stamp() + '\n' + this.eventLogBody();
+    const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
+    pasteboard.getSystemPasteboard().setData(data)
+      .then((): void => {
+        this.statusMessage = '诊断日志已复制到剪贴板（' + this.recoveryEvents.length + ' 条事件）';
+      })
+      .catch((): void => {
+        this.statusMessage = '复制失败，请重试';
+      });
+  }
+
+  private saveTextFile(fileName: string, content: string, okLabel: string): void {
+    const docPicker = new picker.DocumentViewPicker(this.getAbilityContext());
+    const opts = new picker.DocumentSaveOptions();
+    opts.newFileNames = [fileName];
+    docPicker.save(opts)
+      .then((uris: string[]): void => {
+        if (uris.length === 0) {
+          return;
+        }
+        try {
+          const file = fs.openSync(uris[0], fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+          fs.writeSync(file.fd, content);
+          fs.closeSync(file);
+          this.statusMessage = okLabel + '：' + fileName;
+        } catch (err) {
+          this.statusMessage = '写入文件失败';
+          hilog.error(0x0000, 'LianUI', 'save file failed: %{public}s', JSON.stringify(err));
+        }
+      })
+      .catch((): void => {
+        this.statusMessage = '已取消导出';
+      });
+  }
+
+  private stamp(): string {
+    const d = new Date();
+    const p = (n: number): string => {
+      return n < 10 ? '0' + n.toString() : n.toString();
+    };
+    return d.getFullYear().toString() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  private fileStamp(): string {
+    const d = new Date();
+    const p = (n: number): string => {
+      return n < 10 ? '0' + n.toString() : n.toString();
+    };
+    return d.getFullYear().toString() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes());
+  }
+
+  private appVersion(): string {
+    try {
+      return bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT).versionName;
+    } catch (err) {
+      return '1.6.16';
+    }
+  }
+
+  private sessionBlock(): string {
+    let text = '';
+    text += '会话状态：' + (this.connected ? '已连接' : (this.connecting ? '连接中' : '未连接')) + '\n';
+    text += '出口节点：' + this.selectedNode + '\n';
+    text += '当前订阅：' + (this.subscriptionName.length > 0 ? this.subscriptionName : '本地配置') + '\n';
+    text += '代理模式：' + this.proxyMode + '\n';
+    text += 'DNS 模式：' + this.dnsMode + '\n';
+    text += '内核：' + (this.coreRunning
+      ? '运行中（' + this.coreVersion + ' · ' + this.coreMode + ' · TUN fd ' + this.tunFd + '）'
+      : '未运行') + '\n';
+    if (this.coreRunning) {
+      text += '已保护时长：' + (this.sessionStart > 0 ? Fmt.duration(Date.now() - this.sessionStart) : '—') + '\n';
+      text += '活跃连接：' + this.activeConnections + ' 条 · 走代理：' + this.proxyConnections + ' 条\n';
+      text += '上行：' + Fmt.bytes(this.upTotal) + ' · 下行：' + Fmt.bytes(this.downTotal) + '\n';
+    }
+    return text;
+  }
+
+  private eventLogBody(): string {
+    if (this.recoveryEvents.length === 0) {
+      return '（暂无诊断事件）\n';
+    }
+    let text = '';
+    this.recoveryEvents.forEach((ev: RecoveryEvent): void => {
+      text += '[' + ev.time + '] ' + ev.title + ' — ' + ev.desc + '\n';
+    });
+    return text;
+  }
+
+  private reportText(): string {
+    let text = '# xiaobai-clash 流量报告\n\n';
+    text += '生成时间：' + this.stamp() + '\n\n';
+    text += '## 会话概览\n' + this.sessionBlock() + '\n';
+    text += '## 诊断事件时间线\n' + this.eventLogBody();
+    text += '\n---\n仅供个人在自己拥有和控制的设备上审计自己设备的流量去向。\n';
+    return text;
+  }
+
+  private diagnosticsText(): string {
+    let text = 'xiaobai-clash 诊断包\n====================\n';
+    text += '生成时间：' + this.stamp() + '\n';
+    text += '应用版本：v' + this.appVersion() + '\n';
+    text += '设备：' + deviceInfo.brand + ' ' + deviceInfo.productModel + '\n';
+    text += '系统：' + deviceInfo.osFullName + '（API ' + deviceInfo.sdkApiVersion + '）\n\n';
+    text += '## 运行状态\n' + this.sessionBlock() + '\n';
+    text += '## 订阅列表\n';
+    if (this.subProfiles.length === 0) {
+      text += '（无订阅）\n';
+    }
+    this.subProfiles.forEach((s: SubscriptionProfile): void => {
+      text += '- ' + s.name + ' · ' + s.detectedFormat + ' · ' + s.nodeCount + ' 节点 · 更新 ' + s.updatedAt
+        + (s.active ? ' · 【当前】' : '') + '\n';
+    });
+    text += '\n## 生成配置摘要\n' + (this.configSummary.length > 0 ? this.configSummary : '（未生成）') + '\n';
+    text += '\n## 事件时间线\n' + this.eventLogBody();
+    return text;
   }
 
   private getAbilityContext(): common.UIAbilityContext {

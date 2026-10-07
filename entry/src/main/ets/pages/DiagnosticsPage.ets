@@ -17,6 +17,8 @@ export struct DiagnosticsPage {
   @Prop sessionStart: number = 0;
   onExport: () => void = () => {
   };
+  onExportDiagnostics: () => void = () => {
+  };
   onCopy: () => void = () => {
   };
   onClear: () => void = () => {
@@ -125,36 +127,52 @@ export struct DiagnosticsPage {
 
   @Builder
   private actions() {
-    Row({ space: 8 }) {
-      Button('导出报告')
-        .type(ButtonType.Normal)
-        .fontSize(12)
-        .fontWeight(FontWeight.Medium)
-        .fontColor($r('app.color.green_btn_text'))
-        .backgroundColor($r('app.color.green'))
-        .borderRadius(8)
-        .height(38)
-        .layoutWeight(1)
-        .onClick(this.onExport)
-      Button('复制日志')
-        .type(ButtonType.Normal)
-        .fontSize(12)
-        .fontColor($r('app.color.sub'))
-        .backgroundColor($r('app.color.surface'))
-        .border({ width: 1, color: $r('app.color.line_soft') })
-        .borderRadius(8)
-        .height(38)
-        .layoutWeight(1)
-        .onClick(this.onCopy)
-      Button('清空')
-        .type(ButtonType.Normal)
-        .fontSize(12)
-        .fontColor($r('app.color.red'))
-        .backgroundColor($r('app.color.red_soft'))
-        .borderRadius(8)
-        .height(38)
-        .layoutWeight(1)
-        .onClick(this.onClear)
+    Column({ space: 8 }) {
+      Row({ space: 8 }) {
+        Button('导出报告')
+          .type(ButtonType.Normal)
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.green_btn_text'))
+          .backgroundColor($r('app.color.green'))
+          .borderRadius(8)
+          .height(38)
+          .layoutWeight(1)
+          .onClick(this.onExport)
+        Button('导出诊断')
+          .type(ButtonType.Normal)
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#FFFFFF')
+          .backgroundColor($r('app.color.blue'))
+          .borderRadius(8)
+          .height(38)
+          .layoutWeight(1)
+          .onClick(this.onExportDiagnostics)
+      }
+      .width('100%')
+      Row({ space: 8 }) {
+        Button('复制日志')
+          .type(ButtonType.Normal)
+          .fontSize(12)
+          .fontColor($r('app.color.sub'))
+          .backgroundColor($r('app.color.surface'))
+          .border({ width: 1, color: $r('app.color.line_soft') })
+          .borderRadius(8)
+          .height(38)
+          .layoutWeight(1)
+          .onClick(this.onCopy)
+        Button('清空')
+          .type(ButtonType.Normal)
+          .fontSize(12)
+          .fontColor($r('app.color.red'))
+          .backgroundColor($r('app.color.red_soft'))
+          .borderRadius(8)
+          .height(38)
+          .layoutWeight(1)
+          .onClick(this.onClear)
+      }
+      .width('100%')
     }
     .width('100%')
   }
