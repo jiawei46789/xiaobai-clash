@@ -202,8 +202,14 @@ export class AutoNodeSwitcher {
       return;
     }
 
-    // 用户锁定在具体节点：探测该节点，故障则换最快存活节点
-    const delay: number = await this.probe(base, nowName);
+    // 用户锁定在具体节点：探测该节点，故障则换最快存活节点。
+    // 全局模式下 GLOBAL 常停在内置值（DIRECT/REJECT 等）：那等于隧道根本没在代理，
+    // 而探内置值必然假阴性（DIRECT=直连境内探测 gstatic 永远失败）——
+    // 视同失败节点计入连击，达阈值后接管切到存活叶子节点，自愈「全局模式不切换」。
+    let delay: number = -1;
+    if (!this.isBuiltin(nowName)) {
+      delay = await this.probe(base, nowName);
+    }
     if (delay >= 0) {
       if (this.failStreak !== 0) {
         hilog.info(DOMAIN, TAG, 'node %{public}s healthy again delay=%{public}d', nowName, delay);
@@ -224,7 +230,7 @@ export class AutoNodeSwitcher {
     const candidates: string[] = [];
     for (let i = 0; i < all.length; i++) {
       const name: string = all[i];
-      if (name === nowName) {
+      if (name === nowName || this.isBuiltin(name)) {
         continue;
       }
       const node: ControllerNode | undefined = this.getNode(root, name);
