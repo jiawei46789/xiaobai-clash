@@ -144,6 +144,8 @@ export struct SettingsPage {
   @Prop darkMode: boolean = true;
   @Prop screenKeep: boolean = true;
   @Prop failClosed: boolean = false;
+  /** 自动选最优节点开关：同步进 lian-nodeswitch.json，扩展重启连接后生效 */
+  @Prop nodeAutoSwitch: boolean = true;
   @Prop notificationOn: boolean = true;
   @Prop logLevel: string = 'info';
   @Prop testUrl: string = 'https://www.gstatic.com/generate_204';
@@ -192,6 +194,7 @@ export struct SettingsPage {
   @State private subUpdateDraft: string = '';
   @State private localScreenKeep: boolean = true;
   @State private localFailClosed: boolean = false;
+  @State private localNodeAutoSwitch: boolean = true;
   @State private localNotificationOn: boolean = true;
   @State private localLogLevel: string = 'info';
   @State private localTestUrl: string = '';
@@ -202,6 +205,7 @@ export struct SettingsPage {
     this.localNetworkRecover = this.networkRecover;
     this.localScreenKeep = this.screenKeep;
     this.localFailClosed = this.failClosed;
+    this.localNodeAutoSwitch = this.nodeAutoSwitch;
     this.localNotificationOn = this.notificationOn;
     this.localLogLevel = this.logLevel;
     this.localTestUrl = this.testUrl;
@@ -317,6 +321,10 @@ export struct SettingsPage {
         })
         this.switchRow('断线阻断', '异常断开时阻止未保护流量直连', this.localFailClosed, (value: boolean) => {
           this.localFailClosed = value;
+          this.save();
+        })
+        this.switchRow('自动选最优节点', '当前节点约 30 秒不可用时，自动切换到最快可用节点；关闭后故障不自动切换，仅手动选节点', this.localNodeAutoSwitch, (value: boolean) => {
+          this.localNodeAutoSwitch = value;
           this.save();
         })
         this.switchRow('连接状态通知', '显示当前节点和恢复记录', this.localNotificationOn, (value: boolean) => {
@@ -827,7 +835,8 @@ export struct SettingsPage {
       testUrl: this.localTestUrl,
       perAppProxyEnabled: this.perAppProxyEnabled,
       darkMode: this.localDarkMode,
-      subUpdateMinutes: this.localSubUpdateMinutes
+      subUpdateMinutes: this.localSubUpdateMinutes,
+      nodeAutoSwitch: this.localNodeAutoSwitch
     };
   }
 

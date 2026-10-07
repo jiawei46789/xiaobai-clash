@@ -82,6 +82,7 @@ struct Index {
   @State private darkMode: boolean = true;
   @State private screenKeep: boolean = true;
   @State private failClosed: boolean = false;
+  @State private nodeAutoSwitch: boolean = true;
   @State private notificationOn: boolean = true;
   @State private logLevel: string = 'info';
   @State private testUrl: string = 'https://www.gstatic.com/generate_204';
@@ -191,6 +192,7 @@ struct Index {
     this.logLevel = settings.logLevel;
     this.testUrl = settings.testUrl;
     this.subUpdateMinutes = settings.subUpdateMinutes;
+    this.nodeAutoSwitch = settings.nodeAutoSwitch;
     this.dnsMode = settings.dnsMode;
     this.proxyMode = settings.proxyMode;
     this.perAppProxyEnabled = settings.perAppProxyEnabled;
@@ -198,6 +200,7 @@ struct Index {
     this.customApps = this.settingsStore.loadCustomApps();
     // 启动即同步一次，保证「上次的配置」在未进设置页时也生效
     this.syncAppFilterToFile();
+    this.syncNodeSwitchToFile();
     // 核心状态监视器常驻运行：连接状态与上下行/连接数全部以内核心跳为真实依据
     this.startStatsPolling();
     this.reloadSubscriptions();
@@ -478,6 +481,7 @@ struct Index {
         darkMode: this.darkMode,
         screenKeep: this.screenKeep,
         failClosed: this.failClosed,
+        nodeAutoSwitch: this.nodeAutoSwitch,
         notificationOn: this.notificationOn,
         logLevel: this.logLevel,
         testUrl: this.testUrl,
@@ -960,7 +964,8 @@ struct Index {
         testUrl: current.testUrl,
         perAppProxyEnabled: current.perAppProxyEnabled,
         darkMode: current.darkMode,
-        subUpdateMinutes: current.subUpdateMinutes
+        subUpdateMinutes: current.subUpdateMinutes,
+        nodeAutoSwitch: current.nodeAutoSwitch
       };
       this.settingsStore.save(updated);
     }
@@ -1477,6 +1482,7 @@ struct Index {
     this.logLevel = settings.logLevel;
     this.testUrl = settings.testUrl;
     this.subUpdateMinutes = settings.subUpdateMinutes;
+    this.nodeAutoSwitch = settings.nodeAutoSwitch;
     // 只在主题真的变了时才 setColorMode：配置变更会重建 UI 树，
     // 重复触发会把 Toggle 旧参数重新下发形成「开关弹回」乒乓。
     const modeChanged: boolean = this.darkMode !== settings.darkMode;
@@ -1489,7 +1495,39 @@ struct Index {
       this.perAppProxyEnabled = settings.perAppProxyEnabled;
       this.syncAppFilterToFile();
     }
+    this.syncNodeSwitchToFile();
     this.statusMessage = '设置已保存';
+  }
+
+  /**
+   * 把「自动选最优节点」开关同步进扩展可读的 lian-nodeswitch.json。
+   * AutoNodeSwitcher 每次 VPN 启动时读一次该文件。
+   * 开启时按用户口径「30 秒内不可用即切最优」：每 10 秒探测、连续 3 次失败≈30 秒。
+   */
+  private syncNodeSwitchToFile(): void {
+    try {
+      const path: string = this.getAbilityContext().filesDir + '/lian-nodeswitch.json';
+      const cfg: Record<string, number | boolean> = {};
+      cfg['enabled'] = this.nodeAutoSwitch;
+      if (this.nodeAutoSwitch) {
+        cfg['intervalSeconds'] = 10;
+        cfg['failThreshold'] = 3;
+      } else {
+        cfg['intervalSeconds'] = 60;
+        cfg['failThreshold'] = 2;
+      }
+      cfg['probeTimeoutMs'] = 5000;
+      cfg['switchCooldownSeconds'] = 180;
+      cfg['maxTest'] = 40;
+      const f = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+      try {
+        fs.writeSync(f.fd, JSON.stringify(cfg));
+      } finally {
+        fs.closeSync(f);
+      }
+    } catch (err) {
+      hilog.warn(0x0000, 'LianUI', 'node switch config sync failed');
+    }
   }
 
   // ===== 分应用代理 =====
@@ -1527,7 +1565,8 @@ struct Index {
         testUrl: current.testUrl,
         perAppProxyEnabled: value,
         darkMode: current.darkMode,
-        subUpdateMinutes: current.subUpdateMinutes
+        subUpdateMinutes: current.subUpdateMinutes,
+        nodeAutoSwitch: current.nodeAutoSwitch
       };
       this.settingsStore.save(updated);
     }

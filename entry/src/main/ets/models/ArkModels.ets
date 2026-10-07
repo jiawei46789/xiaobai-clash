@@ -88,6 +88,8 @@ export interface AppSettings {
   /** 定时更新订阅：间隔分钟数（0=关闭，有效范围 1-10080）。
    * 应用存活期间到点自动刷新当前订阅；回前台/启动时补检一次 */
   subUpdateMinutes: number;
+  /** 自动选最优节点：开=当前节点约 30 秒不可用时自动切到最快可用节点；关=只做手动选择 */
+  nodeAutoSwitch: boolean;
 }
 
 /**

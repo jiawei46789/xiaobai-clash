@@ -72,7 +72,8 @@ export class SettingsStore {
       testUrl: 'https://www.gstatic.com/generate_204',
       perAppProxyEnabled: false,
       darkMode: true,
-      subUpdateMinutes: 0
+      subUpdateMinutes: 0,
+      nodeAutoSwitch: true
     };
     try {
       const raw = this.store.getSync(KEY_SETTINGS, '') as string;
@@ -94,6 +95,10 @@ export class SettingsStore {
       // 旧存档（≤1.6.16）没有定时更新字段：补默认值，避免 undefined 流入 UI/定时器
       if (typeof parsed.subUpdateMinutes !== 'number') {
         parsed.subUpdateMinutes = 0;
+      }
+      // 旧存档（≤1.6.17）没有自动选节点开关：补默认值（默认开，延续既有自动切换行为）
+      if (typeof parsed.nodeAutoSwitch !== 'boolean') {
+        parsed.nodeAutoSwitch = true;
       }
       // 旧存档可能把 autoConnect 存成了 true；行为已改为纯手动，
       // 启动路径不再消费它（保留字段仅为兼容，不强制洗掉用户旧值）
