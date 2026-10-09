@@ -162,6 +162,8 @@ export struct HomePage {
   @Prop healthDelay: number = 0;
   @Prop healthyNodes: number = 0;
   @Prop totalNodes: number = 0;
+  /** 订阅流量摘要（来自订阅响应头）；空串=未提供，则不渲染该行 */
+  @Prop subUsage: string = '';
   @Prop recoverCount: number = 0;
   @Prop recoveryEvents: RecoveryEvent[] = [];
   onToggle: () => void = () => {
@@ -353,6 +355,9 @@ export struct HomePage {
         HealthRow({ label: '出口可达性', value: this.healthLabel() })
         HealthRow({ label: '可用节点', value: this.connected && this.totalNodes > 0 ? (this.healthyNodes + ' / ' + this.totalNodes) : '—' })
         HealthRow({ label: '自动恢复', value: this.recoverCount > 0 ? '已自愈 ' + this.recoverCount + ' 次' : '未触发' })
+        if (this.subUsage.length > 0) {
+          HealthRow({ label: '订阅流量', value: this.subUsage })
+        }
       }
       .width('100%')
       .borderRadius(8)

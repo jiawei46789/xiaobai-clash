@@ -1,5 +1,6 @@
 import { ContentFrame } from '../common/ContentFrame';
-import { AppSettings, SubscriptionProfile } from '../models/ArkModels';
+import { Fmt } from '../common/Format';
+import { AppSettings, SubscriptionProfile, SubscriptionUsage } from '../models/ArkModels';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { bundleManager } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
@@ -16,6 +17,8 @@ struct SubManageRow {
   @Prop nodeCount: number = 0;
   @Prop updatedAt: string = '';
   @Prop active: boolean = false;
+  /** 一行流量摘要（来自订阅响应头）；空串=该订阅未提供 */
+  @Prop usageLine: string = '';
   onRefresh: (id: string) => void = () => {
   };
   onDelete: (id: string) => void = () => {
@@ -55,6 +58,14 @@ struct SubManageRow {
         .fontColor($r('app.color.muted'))
         .maxLines(1)
         .width('100%')
+
+      if (this.usageLine.length > 0) {
+        Text(this.usageLine)
+          .fontSize(10)
+          .fontColor($r('app.color.blue'))
+          .maxLines(2)
+          .width('100%')
+      }
 
       Row({ space: 8 }) {
         if (!this.active) {
@@ -503,7 +514,12 @@ export struct SettingsPage {
     }
     for (let i = 0; i < this.subscriptions.length; i++) {
       if (this.subscriptions[i].active) {
-        return this.subscriptions[i].name + ' · ' + this.subscriptions[i].nodeCount + ' 节点';
+        let line: string = this.subscriptions[i].name + ' · ' + this.subscriptions[i].nodeCount + ' 节点';
+        const u: SubscriptionUsage | null = this.subscriptions[i].usage ?? null;
+        if (u !== null) {
+          line += u.total > 0 ? ' · 剩 ' + Fmt.bytes(u.remaining) : ' · 已用 ' + Fmt.bytes(u.used);
+        }
+        return line;
       }
     }
     return this.subscriptions.length + ' 个订阅（无激活项）';
@@ -628,14 +644,33 @@ export struct SettingsPage {
             nodeCount: item.nodeCount,
             updatedAt: item.updatedAt,
             active: item.active,
+            usageLine: this.usageLineOf(item),
             onRefresh: this.onRefreshSubscription,
             onDelete: this.onDeleteSubscription,
             onSelect: this.onSelectSubscription
           })
-        }, (item: SubscriptionProfile) => item.id + '-' + item.updatedAt + '-' + item.active + '-' + item.nodeCount)
+        }, (item: SubscriptionProfile) => item.id + '-' + item.updatedAt + '-' + item.active + '-' + item.nodeCount + '-' + this.usageLineOf(item))
       }
     }
     .width('100%')
+  }
+
+  /** 订阅列表项的一行流量摘要；未提供流量时返回空串（该行不渲染） */
+  private usageLineOf(item: SubscriptionProfile): string {
+    const u: SubscriptionUsage | null = item.usage ?? null;
+    if (u === null) {
+      return '';
+    }
+    let line: string;
+    if (u.total <= 0) {
+      line = '已用 ' + Fmt.bytes(u.used);
+    } else {
+      line = '剩 ' + Fmt.bytes(u.remaining) + ' / ' + Fmt.bytes(u.total);
+    }
+    if (u.expireMs > 0) {
+      line += ' · 到期 ' + Fmt.expire(u.expireMs);
+    }
+    return line;
   }
 
   @Builder

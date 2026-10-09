@@ -44,6 +44,29 @@ export interface DnsServer {
   kind: string;
 }
 
+/**
+ * 订阅流量用量（仅真实数据，来源：订阅响应的 `subscription-userinfo` 响应头）。
+ * 主体机场客户端都走这个约定：格式形如
+ *   upload=123; download=456; total=789; expire=1730000000
+ * 其中 expire 为到期时间（秒时间戳）。字段可能缺失，缺失时按 -1/0 表示未知。
+ */
+export interface SubscriptionUsage {
+  /** 已上传字节 */
+  upload: number;
+  /** 已下载字节 */
+  download: number;
+  /** 套餐总流量字节；-1 表示订阅方未提供 */
+  total: number;
+  /** 已用 = upload + download */
+  used: number;
+  /** 剩余字节；total 未知时为 -1 */
+  remaining: number;
+  /** 到期时间（毫秒时间戳）；0 表示未提供 */
+  expireMs: number;
+  /** 最近一次刷新用量的时间（毫秒时间戳） */
+  updatedAt: number;
+}
+
 export interface SubscriptionProfile {
   id: string;
   name: string;
@@ -53,6 +76,8 @@ export interface SubscriptionProfile {
   updatedAt: string;
   active: boolean;
   content: string;
+  /** 最近一次解析到的流量用量；null = 该订阅未提供（旧存档兼容） */
+  usage?: SubscriptionUsage | null;
 }
 
 export interface ImportResult {

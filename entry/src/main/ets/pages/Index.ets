@@ -10,7 +10,8 @@ import {
   ProxyNode,
   RecoveryEvent,
   RuleItem,
-  SubscriptionProfile
+  SubscriptionProfile,
+  SubscriptionUsage
 } from '../models/ArkModels';
 import { MockData } from '../services/MockData';
 import { SubscriptionService } from '../services/SubscriptionService';
@@ -117,6 +118,8 @@ struct Index {
   @State private subProfiles: SubscriptionProfile[] = [];
   @State private activeSubId: string = '';
   @State private configSummary: string = '';
+  /** 当前订阅的流量用量（来源：订阅响应头 subscription-userinfo），null=订阅方未提供 */
+  @State private usage: SubscriptionUsage | null = null;
   /** 分应用代理：是否启用 */
   @State private perAppProxyEnabled: boolean = false;
   /** 分应用代理：不使用代理（直连）的包名集合 */
@@ -136,6 +139,9 @@ struct Index {
   private subUpdating: boolean = false;
   /** 连接期自动测速：秒级 tick（用户要求 1.6.19：VPN 连接后每 10 秒测全部节点） */
   private nodeTestTick: number = 0;
+  /** 流量用量自动刷新：秒级 tick（每 5 分钟读一次订阅响应头，不重载核心） */
+  private usageTick: number = 0;
+  @State private usageUpdating: boolean = false;
   @State private subUpdateMinutes: number = 0;
   /** 最近一次读到有效心跳的时间 */
   private coreLastSeen: number = 0;
@@ -313,6 +319,7 @@ struct Index {
         totalNodes: this.totalNodes,
         recoverCount: this.recoverCount,
         recoveryEvents: this.recoveryEvents,
+        subUsage: this.subUsageLine(),
         onToggle: (): void => {
           this.toggleVpn();
         },
@@ -361,6 +368,11 @@ struct Index {
         subscriptionName: this.subscriptionName,
         importMessage: this.importMessage,
         subscriptions: this.subProfiles,
+        usage: this.usage,
+        usageRefreshing: this.usageUpdating,
+        onRefreshUsage: (): void => {
+          this.refreshActiveUsage();
+        },
         onSelectSubscription: (id: string): void => {
           this.selectSubscriptionById(id);
         },
@@ -528,6 +540,8 @@ struct Index {
     this.refreshCoreStatus();
     // 启动/回前台先补一次定时订阅检查（可能上次运行期间已到期）
     this.checkSubUpdateDue();
+    // 旧存档可能还没有用量字段，启动时轻量拉一次响应头补齐
+    this.refreshActiveUsage();
     this.statsTimer = setInterval(() => {
       this.refreshCoreStatus();
       // 每分钟检查一次定时更新订阅
@@ -540,6 +554,11 @@ struct Index {
       this.nodeTestTick++;
       if (this.connected && this.nodeTestTick % 10 === 0 && !this.testingAll) {
         this.testAllNodes(true);
+      }
+      // 每 5 分钟轻量刷新一次订阅流量用量（只读响应头，不重载核心）
+      this.usageTick++;
+      if (this.usageTick % 300 === 0) {
+        this.refreshActiveUsage();
       }
     }, 1000);
   }
@@ -816,7 +835,41 @@ struct Index {
       }
     }
     this.activeSubId = activeId;
-    this.nodeCount = this.subService.getActive()?.nodeCount ?? 0;
+    const active = this.subService.getActive();
+    this.nodeCount = active?.nodeCount ?? 0;
+    this.usage = active?.usage ?? null;
+  }
+
+  /**
+   * 轻量刷新当前订阅的流量用量（只读响应头，不重建配置、不断线）。
+   * 失败静默（保留旧值并记一条诊断），避免因为机场偶尔报错而打扰用户。
+   */
+  private refreshActiveUsage(): void {
+    if (this.subService === undefined || this.usageUpdating) {
+      return;
+    }
+    const active = this.subService.getActive();
+    if (active === null || active === undefined) {
+      this.usage = null;
+      return;
+    }
+    if (active.sourceUrl.indexOf('pasted://') === 0) {
+      this.usage = active.usage ?? null;
+      return;
+    }
+    this.usageUpdating = true;
+    this.subService.refreshUsage(active.id)
+      .then((fresh: SubscriptionUsage | null): void => {
+        this.usageUpdating = false;
+        if (fresh !== null) {
+          this.usage = fresh;
+        }
+      })
+      .catch((err: Object): void => {
+        this.usageUpdating = false;
+        const msg = err instanceof Error ? err.message : '用量刷新失败';
+        hilog.warn(DOMAIN, TAG, 'usage refresh failed: %{public}s', msg);
+      });
   }
 
   /** 刷新指定订阅：重新下载并原地更新 */
@@ -1238,6 +1291,17 @@ struct Index {
       this.statusMessage = result.error ?? 'VPN 启动失败';
       this.pushEvent('连接失败', this.statusMessage, 'warn');
     }
+  }
+
+  private subUsageLine(): string {
+    const u: SubscriptionUsage | null = this.usage;
+    if (u === null) {
+      return '';
+    }
+    if (u.total > 0) {
+      return '剩 ' + Fmt.bytes(u.remaining) + ' / ' + Fmt.bytes(u.total);
+    }
+    return '已用 ' + Fmt.bytes(u.used);
   }
 
   private async importUrl(name: string, url: string): Promise<void> {
@@ -1773,6 +1837,8 @@ struct Index {
     }
     this.subProfiles.forEach((s: SubscriptionProfile): void => {
       text += '- ' + s.name + ' · ' + s.detectedFormat + ' · ' + s.nodeCount + ' 节点 · 更新 ' + s.updatedAt
+        + (s.usage !== null && s.usage !== undefined && s.usage.total > 0
+          ? ' · 剩 ' + Fmt.bytes(s.usage.remaining) + '/' + Fmt.bytes(s.usage.total) : '')
         + (s.active ? ' · 【当前】' : '') + '\n';
     });
     text += '\n## 生成配置摘要\n' + (this.configSummary.length > 0 ? this.configSummary : '（未生成）') + '\n';

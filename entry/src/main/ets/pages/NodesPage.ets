@@ -1,5 +1,6 @@
 import { ContentFrame } from '../common/ContentFrame';
-import { ProxyGroup, ProxyNode, SubscriptionProfile } from '../models/ArkModels';
+import { Fmt } from '../common/Format';
+import { ProxyGroup, ProxyNode, SubscriptionProfile, SubscriptionUsage } from '../models/ArkModels';
 
 /** 排序维度：延迟 / 名称 */
 type SortKey = 'latency' | 'name';
@@ -35,6 +36,12 @@ export struct NodesPage {
   @Prop importMessage: string = '';
   /** 全部已导入订阅：供「切换」面板列表使用（item.active 标记当前） */
   @Prop subscriptions: SubscriptionProfile[] = [];
+  /** 当前订阅的流量用量（来源：订阅响应头 subscription-userinfo）；null=未提供 */
+  @Prop usage: SubscriptionUsage | null = null;
+  /** 用量是否正在刷新（显示「刷新中」并在卡片上打了暗） */
+  @Prop usageRefreshing: boolean = false;
+  onRefreshUsage: () => void = () => {
+  };
   onSelectNode: (name: string) => void = () => {
   };
   onSelectSubscription: (id: string) => void = () => {
@@ -97,6 +104,7 @@ export struct NodesPage {
       ContentFrame() {
         Column({ space: 8 }) {
           this.subscriptionBar()
+          this.usageCard()
           if (this.showSwitcher) {
             this.subscriptionSwitcher()
           }
@@ -139,8 +147,7 @@ export struct NodesPage {
       Text(this.subscriptionMeta())
         .fontSize(11)
         .fontColor($r('app.color.muted'))
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .maxLines(2)
         .layoutWeight(1)
         .margin({ left: 8 })
       // 订阅切换入口：≥ 2 个订阅时显示（纯文字，零缺字风险）。
@@ -228,7 +235,7 @@ export struct NodesPage {
           }
           this.showSwitcher = false;
         })
-      }, (item: SubscriptionProfile) => item.id + '-' + item.active + '-' + item.nodeCount)
+      }, (item: SubscriptionProfile) => item.id + '-' + item.active + '-' + item.nodeCount + '-' + (item.usage !== null && item.usage !== undefined ? item.usage.used : -1))
     }
     .width('100%')
     .padding({ bottom: 6 })
@@ -237,12 +244,194 @@ export struct NodesPage {
     .border({ width: 1, color: $r('app.color.line') })
   }
 
-  /** 订阅元信息：节点数 · 格式。单条呈现，不再与分组头重复。 */
+  /** 订阅元信息：节点数 · 格式（· 流量摘要）。单条呈现，不再与分组头重复。 */
   private subscriptionMeta(): string {
+    let base: string;
     if (this.nodeCount <= 0) {
-      return 'Clash / Base64 / 分享链接';
+      base = 'Clash / Base64 / 分享链接';
+    } else {
+      base = this.nodeCount + ' 节点 · ' + this.subscriptionFormat();
     }
-    return this.nodeCount + ' 节点 · ' + this.subscriptionFormat();
+    if (this.usage !== null) {
+      base += ' · ' + this.usageSummary();
+    }
+    return base;
+  }
+
+  /** 一行式流量摘要：有总量显示「剩 x / y」，否则显示「已用 x」 */
+  private usageSummary(): string {
+    const u: SubscriptionUsage | null = this.usage;
+    if (u === null) {
+      return '';
+    }
+    if (u.total <= 0) {
+      return '已用 ' + Fmt.bytes(u.used);
+    }
+    return '剩 ' + Fmt.bytes(u.remaining) + ' / ' + Fmt.bytes(u.total);
+  }
+
+  private usageRemaining(): string {
+    const u: SubscriptionUsage | null = this.usage;
+    if (u === null) {
+      return '—';
+    }
+    if (u.total <= 0) {
+      return '未知';
+    }
+    return Fmt.bytes(u.remaining);
+  }
+
+  private usageUsedLine(): string {
+    const u: SubscriptionUsage | null = this.usage;
+    if (u === null) {
+      return '';
+    }
+    if (u.total <= 0) {
+      return '已用 ' + Fmt.bytes(u.used) + ' · 未提供总量';
+    }
+    return Fmt.bytes(u.used) + ' / ' + Fmt.bytes(u.total);
+  }
+
+  private usagePercent(): number {
+    const u: SubscriptionUsage | null = this.usage;
+    return u === null ? -1 : Fmt.usedPercent(u.used, u.total);
+  }
+
+  /** 剩余量低于 20% 转琥珀、低于 10% 转红，便于一眼看出快用完 */
+  private usageTone(): ResourceColor {
+    const pct: number = this.usagePercent();
+    if (pct < 0) {
+      return $r('app.color.text');
+    }
+    if (pct >= 80) {
+      return $r('app.color.red');
+    }
+    if (pct >= 60) {
+      return $r('app.color.amber');
+    }
+    return $r('app.color.green');
+  }
+
+  /**
+   * 流量卡片：剩余流量 + 已用/总量 + 进度条 + 到期时间。
+   * 全部数据来自订阅响应头的 subscription-userinfo，不做任何估算。
+   */
+  @Builder
+  private usageCard() {
+    Column({ space: 8 }) {
+      Row() {
+        Text('订阅流量')
+          .fontSize(12)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.sub'))
+        Blank()
+        if (this.subscriptions.length > 0 && this.usage !== null) {
+          Text(this.usageRefreshing ? '刷新中' : '刷新')
+            .fontSize(11)
+            .fontColor(this.usageRefreshing ? $r('app.color.muted') : $r('app.color.blue'))
+            .onClick(() => {
+              this.onRefreshUsage();
+            })
+        }
+      }
+      .width('100%')
+
+      if (this.usage === null) {
+        Text('该订阅未提供流量信息（服务器未返回 subscription-userinfo）')
+          .fontSize(11)
+          .fontColor($r('app.color.muted'))
+          .width('100%')
+      } else {
+        Row({ space: 12 }) {
+          Column({ space: 3 }) {
+            Text('剩余')
+              .fontSize(10)
+              .fontColor($r('app.color.muted'))
+            Text(this.usageRemaining())
+              .fontSize(19)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.usageTone())
+              .maxLines(1)
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          Column({ space: 3 }) {
+            Text('已用 / 总量')
+              .fontSize(10)
+              .fontColor($r('app.color.muted'))
+            Text(this.usageUsedLine())
+              .fontSize(12)
+              .fontColor($r('app.color.text'))
+              .maxLines(1)
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+        }
+        .width('100%')
+
+        if (this.usagePercent() >= 0) {
+          Row({ space: 8 }) {
+            Progress({ value: this.usagePercent(), total: 100, type: ProgressType.Linear })
+              .layoutWeight(1)
+              .color(this.usageTone())
+              .backgroundColor($r('app.color.line_soft'))
+            Text(this.usagePercent() + '%')
+              .fontSize(11)
+              .fontColor($r('app.color.muted'))
+          }
+          .width('100%')
+        }
+
+        Row({ space: 12 }) {
+          Text('↑ ' + this.usageUpText())
+            .fontSize(10)
+            .fontColor($r('app.color.muted'))
+          Text('↓ ' + this.usageDownText())
+            .fontSize(10)
+            .fontColor($r('app.color.muted'))
+          Blank()
+          Text('到期 ' + this.usageExpireText())
+            .fontSize(10)
+            .fontColor(this.usageExpireTone())
+        }
+        .width('100%')
+      }
+    }
+    .width('100%')
+    .padding(12)
+    .borderRadius(10)
+    .backgroundColor($r('app.color.surface'))
+    .border({ width: 1, color: $r('app.color.line_soft') })
+    .opacity(this.usageRefreshing ? 0.6 : 1)
+  }
+
+  private usageUpText(): string {
+    const u: SubscriptionUsage | null = this.usage;
+    return u === null ? '—' : Fmt.bytes(u.upload);
+  }
+
+  private usageDownText(): string {
+    const u: SubscriptionUsage | null = this.usage;
+    return u === null ? '—' : Fmt.bytes(u.download);
+  }
+
+  private usageExpireText(): string {
+    const u: SubscriptionUsage | null = this.usage;
+    return u === null ? '未提供' : Fmt.expire(u.expireMs);
+  }
+
+  private usageExpireTone(): ResourceColor {
+    const u: SubscriptionUsage | null = this.usage;
+    if (u === null || u.expireMs <= 0) {
+      return $r('app.color.muted');
+    }
+    if (u.expireMs <= Date.now()) {
+      return $r('app.color.red');
+    }
+    if (u.expireMs - Date.now() <= 3 * 86400000) {
+      return $r('app.color.amber');
+    }
+    return $r('app.color.muted');
   }
 
   private subscriptionFormat(): string {

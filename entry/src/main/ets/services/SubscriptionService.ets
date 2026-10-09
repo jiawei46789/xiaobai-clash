@@ -4,7 +4,7 @@ import fileIo from '@ohos.file.fs';
 import { http } from '@kit.NetworkKit';
 import { buffer, util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { ImportResult, ProxyNode, SubscriptionProfile } from '../models/ArkModels';
+import { ImportResult, ProxyNode, SubscriptionProfile, SubscriptionUsage } from '../models/ArkModels';
 
 const DOMAIN = 0x2023;
 const TAG = 'SubSvc';
@@ -15,6 +15,19 @@ const KEY_ACTIVE_ID = 'subscription.activeId';
 const SUB_DIR = '/subscriptions';
 const UA = 'lian-connect/0.01';
 const ACCEPT = 'application/x-yaml, text/yaml, text/plain';
+
+/**
+ * 一次订阅抓取的完整结果。
+ *
+ * 除了配置正文（content），还带有从响应头 `subscription-userinfo` 解析出的
+ * 流量用量（usage）。许多机场只在**响应头**里给用量，正文里看不到，所以必须
+ * 在下载这一层就把头抓下来，不能等以后再单独发一次请求（会希望重定向/鉴权
+ * 变得复杂）。usage 为 null 表示该订阅方未提供用量信息。
+ */
+interface FetchResult {
+  content: string;
+  usage: SubscriptionUsage | null;
+}
 
 /**
  * Clash YAML 顶层键表（顶格匹配）：命中任意一个即认定为 YAML。
@@ -81,12 +94,12 @@ export class SubscriptionService {
 
   async addSubscription(url: string, name: string): Promise<SubscriptionProfile> {
     const validUrl = this.validateUrl(url);
-    const content = await this.fetchSubscription(validUrl);
-    const result = this.analyzeContent(content);
+    const fetched = await this.fetchSubscription(validUrl);
+    const result = this.analyzeContent(fetched.content);
     if (!result.ok) {
       throw new Error(result.message);
     }
-    return this.persistProfile(name.length > 0 ? name : '我的订阅', validUrl, result);
+    return this.persistProfile(name.length > 0 ? name : '我的订阅', validUrl, result, fetched.usage);
   }
 
   addPastedContent(name: string, content: string): SubscriptionProfile {
@@ -94,7 +107,9 @@ export class SubscriptionService {
     if (!result.ok) {
       throw new Error(result.message);
     }
-    return this.persistProfile(name.length > 0 ? name : '剪贴板配置', 'pasted://local', result);
+    // 剪切板导入没有响应头，只能尝试从正文注释里提取用量（无则为 null）
+    const usage = this.usageFromBody(content);
+    return this.persistProfile(name.length > 0 ? name : '剪贴板配置', 'pasted://local', result, usage);
   }
 
   /**
@@ -116,12 +131,17 @@ export class SubscriptionService {
       throw new Error('本地粘贴的配置无法刷新，请重新导入');
     }
     const validUrl = this.validateUrl(target.sourceUrl);
-    const content = await this.fetchSubscription(validUrl);
-    const result = this.analyzeContent(content);
+    const fetched = await this.fetchSubscription(validUrl);
+    const result = this.analyzeContent(fetched.content);
     if (!result.ok) {
       throw new Error(result.message);
     }
     this.writeContent(id, result.content);
+    // 用量优先用本次响应头；本次未提供时保留上一次已知值，避免刷新一下反而把用量“洗掉”
+    let usage: SubscriptionUsage | null = fetched.usage;
+    if (usage === null && target.usage !== undefined && target.usage !== null) {
+      usage = target.usage;
+    }
     const updated: SubscriptionProfile = {
       id: target.id,
       name: target.name,
@@ -130,7 +150,8 @@ export class SubscriptionService {
       nodeCount: result.nodeCount,
       updatedAt: new Date().toISOString(),
       active: target.active,
-      content: ''
+      content: '',
+      usage: usage
     };
     const next: SubscriptionProfile[] = [];
     for (let i = 0; i < profiles.length; i++) {
@@ -226,7 +247,8 @@ export class SubscriptionService {
     };
   }
 
-  private persistProfile(name: string, sourceUrl: string, result: ImportResult): SubscriptionProfile {
+  private persistProfile(name: string, sourceUrl: string, result: ImportResult,
+    usage: SubscriptionUsage | null): SubscriptionProfile {
     const id = this.newId();
     const profile: SubscriptionProfile = {
       id: id,
@@ -236,7 +258,8 @@ export class SubscriptionService {
       nodeCount: result.nodeCount,
       updatedAt: new Date().toISOString(),
       active: true,
-      content: ''
+      content: '',
+      usage: usage
     };
     this.writeContent(id, result.content);
     let profiles = this.loadProfiles();
@@ -259,7 +282,7 @@ export class SubscriptionService {
     return trimmed;
   }
 
-  private async fetchSubscription(url: string): Promise<string> {
+  private async fetchSubscription(url: string): Promise<FetchResult> {
     const req = http.createHttp();
     try {
       const response = await req.request(url, {
@@ -276,7 +299,14 @@ export class SubscriptionService {
       if (status < 200 || status >= 300) {
         throw new Error('HTTP ' + status);
       }
-      return response.result as string;
+      const content = response.result as string;
+      // 用量：优先读响应头 subscription-userinfo（机场通用约定），
+      // 头里没有时再退一步扫正文注释（少数机场把用量写成注释）。
+      let usage: SubscriptionUsage | null = this.usageFromHeaders(response.header);
+      if (usage === null) {
+        usage = this.usageFromBody(content);
+      }
+      return { content: content, usage: usage };
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('HTTP ')) {
         throw err;
@@ -285,6 +315,147 @@ export class SubscriptionService {
     } finally {
       req.destroy();
     }
+  }
+
+  /**
+   * 仅刷新指定订阅的流量用量（读取响应头，不改动节点正文与更新时刻）。
+   *
+   * 给「自动刷新用量」这个轻量路径使用：定时刷新订阅内容会重载核心造成闪断，
+   * 而用量只是个展示数字，没必要动核心。pasted:// 本地导入没有远程头，
+   * 直接回退到已存值。
+   */
+  async refreshUsage(id: string): Promise<SubscriptionUsage | null> {
+    const profiles = this.loadProfiles();
+    let target: SubscriptionProfile | undefined = undefined;
+    for (let i = 0; i < profiles.length; i++) {
+      if (profiles[i].id === id) {
+        target = profiles[i];
+        break;
+      }
+    }
+    if (target === undefined) {
+      throw new Error('订阅不存在');
+    }
+    if (target.sourceUrl.indexOf('pasted://') === 0) {
+      return target.usage ?? null;
+    }
+    const validUrl = this.validateUrl(target.sourceUrl);
+    const fetched = await this.fetchSubscription(validUrl);
+    target.usage = fetched.usage;
+    const next: SubscriptionProfile[] = [];
+    for (let i = 0; i < profiles.length; i++) {
+      next.push(profiles[i].id === id ? target : profiles[i]);
+    }
+    this.saveProfiles(next);
+    return fetched.usage;
+  }
+
+  /** 从响应头中提取 subscription-userinfo（键名大小写不敏感） */
+  private usageFromHeaders(header: Object): SubscriptionUsage | null {
+    try {
+      const headers = header as Record<string, string>;
+      const keys: string[] = Object.keys(headers);
+      for (let i = 0; i < keys.length; i++) {
+        if (keys[i].toLowerCase() !== 'subscription-userinfo') {
+          continue;
+        }
+        const raw = headers[keys[i]];
+        if (typeof raw === 'string' && raw.length > 0) {
+          const parsed = this.parseUsageString(raw);
+          if (parsed !== null) {
+            return parsed;
+          }
+        }
+      }
+    } catch (_err) {
+      return null;
+    }
+    return null;
+  }
+
+  /** 从正文前若干行里找 `# subscription-userinfo:` 注释（少数机场的写法） */
+  private usageFromBody(content: string): SubscriptionUsage | null {
+    const lines: string[] = content.split('\n');
+    const limit: number = Math.min(lines.length, 60);
+    for (let i = 0; i < limit; i++) {
+      let line: string = lines[i].trim();
+      if (line.startsWith('#')) {
+        line = line.substring(1).trim();
+      }
+      if (!line.toLowerCase().startsWith('subscription-userinfo')) {
+        continue;
+      }
+      const colon: number = line.indexOf(':');
+      if (colon > 0) {
+        const parsed = this.parseUsageString(line.substring(colon + 1).trim());
+        if (parsed !== null) {
+          return parsed;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 解析 `upload=..; download=..; total=..; expire=..`。
+   * 字段可能缺失或顺序不一，因此按 key 逐项认，认不出就留未知。
+   * expire 可能是秒（10 位）或毫秒（13 位）时间戳，按量级归一。
+   */
+  private parseUsageString(text: string): SubscriptionUsage | null {
+    const parts: string[] = text.split(';');
+    let upload: number = 0;
+    let download: number = 0;
+    let total: number = 0;
+    let expireMs: number = 0;
+    let found: boolean = false;
+    for (let i = 0; i < parts.length; i++) {
+      const seg: string = parts[i].trim();
+      const eq: number = seg.indexOf('=');
+      if (eq <= 0) {
+        continue;
+      }
+      const key: string = seg.substring(0, eq).trim().toLowerCase();
+      const value: number = Number(seg.substring(eq + 1).trim());
+      if (Number.isNaN(value)) {
+        continue;
+      }
+      if (key === 'upload') {
+        upload = value > 0 ? value : 0;
+        found = true;
+      } else if (key === 'download') {
+        download = value > 0 ? value : 0;
+        found = true;
+      } else if (key === 'total') {
+        total = value > 0 ? value : 0;
+        found = true;
+      } else if (key === 'expire') {
+        expireMs = value > 100000000000 ? Math.floor(value) : Math.floor(value * 1000);
+        found = true;
+      }
+    }
+    if (!found) {
+      return null;
+    }
+    return this.buildUsage(upload, download, total, expireMs);
+  }
+
+  /** 把原始字节/时间戳归一成 SubscriptionUsage（total=0 视为未提供） */
+  private buildUsage(upload: number, download: number, total: number, expireMs: number): SubscriptionUsage {
+    const used: number = upload + download;
+    const hasTotal: boolean = total > 0;
+    let remaining: number = hasTotal ? total - used : -1;
+    if (hasTotal && remaining < 0) {
+      remaining = 0;
+    }
+    return {
+      upload: upload,
+      download: download,
+      total: hasTotal ? total : -1,
+      used: used,
+      remaining: remaining,
+      expireMs: expireMs > 0 ? expireMs : 0,
+      updatedAt: Date.now()
+    };
   }
 
   private detectFormat(content: string): string {

@@ -70,4 +70,37 @@ export class Fmt {
   static latency(ms: number): string {
     return ms > 0 ? ms + ' ms' : '未测';
   }
+
+  /** 字节数展示；负数（未知）显示「未知」 */
+  static dataSize(n: number): string {
+    return n < 0 ? '未知' : Fmt.bytes(n);
+  }
+
+  /**
+   * 订阅到期展示：毫秒时间戳 -> "2026-12-31（剩 83 天）"。
+   * 0 表示订阅方未提供到期时间；已过期时显式标注。
+   */
+  static expire(ms: number): string {
+    if (ms <= 0) {
+      return '未提供';
+    }
+    const d = new Date(ms);
+    const mo = d.getMonth() + 1;
+    const day = d.getDate();
+    const date = d.getFullYear() + '-' + (mo < 10 ? '0' : '') + mo + '-' + (day < 10 ? '0' : '') + day;
+    const days = Math.ceil((ms - Date.now()) / 86400000);
+    if (days < 0) {
+      return date + '（已到期）';
+    }
+    return date + '（剩 ' + days + ' 天）';
+  }
+
+  /** 已用占比（0-100）；total 未知时返回 -1 */
+  static usedPercent(used: number, total: number): number {
+    if (total <= 0) {
+      return -1;
+    }
+    const pct = Math.round((used / total) * 100);
+    return pct > 100 ? 100 : pct;
+  }
 }
