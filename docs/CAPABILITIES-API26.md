@@ -246,3 +246,92 @@ curl.exe -x http://127.0.0.1:17890 -A "lian-connect/0.01" -D hdr.txt -o body.txt
 
 旧逻辑在网络层异常时会拿 10 个 UA 各等 30 秒 —— 死链导入能卡住几分钟。
 现在网络层错误码（SNI 重置/DNS/TLS/超时）立刻结束本轮并切换链路。
+
+## 八、1.6.26 沉浸光感优化
+
+在 1.6.25 底部悬浮栏的基础上做体验打磨，共 6 处。
+
+### 优化项
+
+| 改动 | 为什么 |
+|---|---|
+| `lightColor: $r('app.color.green')` | 悬浮胶囊边缘高光默认是 HDS 中性光，与应用主色无关。给品牌绿后，边缘光与首页「已保护」状态同调 |
+| `adaptToHandedness: true` | 胶囊向惯用手一侧偏移，单手操作时拇指更容易够到 |
+| 标题栏磨砂按算力自适应 | `getGlobalMaterialLevel()` → `COMPONENT_THICK / REGULAR / THIN`。之前写死 REGULAR，高算力机器上材质偏薄、低端机上又白烧 GPU |
+| `BlurStyleActivePolicy.ALWAYS_ACTIVE` | 默认 `FOLLOWS_WINDOW_ACTIVE_STATE` 在窗口失活时会把材质降级成 `inactiveColor`（一块纯色），下拉通知中心或分屏时标题栏会「掉材质」闪一下 |
+| 去掉标题栏 1px 硬描边 | 磨砂材质自带边界，再叠一条实线会跟模糊「打架」，看着发脏 |
+| 页签标签去重 | `connections` 与 `home` 都叫「连接」，底部栏出现两个一模一样的标签，用户无法分辨当前在哪一页。改为「实时」（`pageTitle` 里仍叫「实时连接」） |
+
+标题栏磨砂档位映射：
+
+```ts
+private adaptiveHeaderBlur(): BlurStyle {
+  const level = uiMaterial.getGlobalMaterialLevel();
+  if (level === uiMaterial.MaterialLevel.EXQUISITE) return BlurStyle.COMPONENT_THICK;
+  if (level === uiMaterial.MaterialLevel.SMOOTH)    return BlurStyle.COMPONENT_THIN;
+  return BlurStyle.COMPONENT_REGULAR;   // GENTLE 与取不到档位时的兜底
+}
+```
+
+取不到档位时退回 REGULAR，即改动前的默认观感 —— 降级不改变行为，只是不优化。
+
+### 坑：ArkUI 全局声明遮蔽 HDS 同名类型
+
+`scrollEffectOpts` + `ScrollEffectType.IMMERSIVE_GRADIENT_BLUR`（滚动联动渐变模糊，
+沉浸光感最有辨识度的行为）**没能配上**。不是不想配，是在当前 SDK 组合下
+**类型层面表达不出来**：
+
+- HDS 的 `SystemMaterialParams.scrollEffectOpts` 声明类型是 `ScrollEffectOptions`；
+- 但 `@hms.hds.hdsBaseComponent` 自身**并未 import 该名字**，于是编译器把它绑定到
+  ArkUI 的全局同名接口 `declarations/navigation.d.ts:1664`；
+- ArkUI 那个只有 3 个字段，**没有** `enableScrollEffect`，其 `ScrollEffectType`
+  也只有 `COMMON_BLUR / GRADUAL_BLUR`，**没有** `IMMERSIVE_GRADIENT_BLUR`。
+
+两个同名类型的成员集对比：
+
+| | ArkUI 全局（实际被绑定的） | HDS（我们以为在用的） |
+|---|---|---|
+| `ScrollEffectType` | COMMON_BLUR / GRADUAL_BLUR | + GRADIENT_BLUR / **IMMERSIVE_GRADIENT_BLUR** |
+| `ScrollEffectOptions` | 3 字段 | 6 字段（含 `enableScrollEffect`、`materialType`） |
+
+即便把 HDS 版本用别名导入（`ScrollEffectOptions as HdsScrollEffectOptions`），
+赋值给 `scrollEffectOpts` 时类型仍然对不上，报：
+
+```
+Type '{ materialType: ...; materialLevel: ...; scrollEffectOpts: HdsScrollEffectOptions; }'
+  is not assignable to type 'SystemMaterialParams'.
+```
+
+排查这类问题**别靠猜，直接查遮蔽源**：
+
+```powershell
+# 哪些 ArkUI 全局声明与我要用的 HDS 类型同名
+Get-ChildItem "$SDK\openharmony\ets\build-tools\ets-loader\declarations" -Filter *.d.ts |
+  Select-String -Pattern "(interface|enum|type|class)\s+ScrollEffectOptions\b"
+```
+
+已确认同名的还有 `SystemUiMaterial`（`common.d.ts:16964`）。
+用 HDS 类型时凡是 ArkUI 侧也有同名的，一律显式导入 + 重命名，别依赖 kit 的透传。
+
+另一个连带坑：嵌套对象字面量在 ArkTS 下**不做跨层类型推断**，三层嵌套写法会一次性报
+3 个 `arkts-no-untyped-obj-literals` + 1 个不可赋值。必须拆成显式类型的局部变量再组装
+（见 `Index.buildBarFloatingStyle()`）。
+
+### 真机验证（MIA-AL00 · API 26 · HarmonyOS 7.0.0.109）
+
+| 指标 | 结果 |
+|---|---|
+| `grep -c 'Material inactive'` | **0** |
+| `grep -cE 'ParseProp failed\|barPosition is not a number'` | **0** |
+| JsError / crash / Fault | 无 |
+| 页签标签唯一性 | 9 个全部唯一（重复「连接」已消除） |
+| 悬浮胶囊几何 | `x=58..1166`（屏宽 1224，左右各内缩 ~58px）、`y=2493..2682` |
+| 标题栏跟随点击 | 「连接」→ 点视觉 → 「视觉」 |
+| 标题栏描边 | `borderWidth` 为空（已按预期移除） |
+| 视觉页四块内容 | 3D 视图 / 材质档位 / 双边流光 均在位 |
+
+> 1.6.25 与 1.6.26 的验证标准一致：运行时日志计数 + `uitest dumpLayout` 几何证据，
+> 不依赖截图（本机无视觉模型，`view_image` 不可用）。
+> 残余的 `!fsTabBarHandler_`、`hmos_hds_tab_pattern get attr ... error!`、
+> `GetAsset failed: resources/styles/default.json` 均为框架级噪音，1.6.25 起就存在，
+> 与本工程配置无关。
