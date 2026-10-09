@@ -40,8 +40,53 @@
 - **沉浸光感**：`import { HdsNavigation, HdsTabs, HdsTabsController } from '@kit.UIDesignKit'`；
   底部页签用 `HdsTabs`，在 `barFloatingStyle.systemMaterialEffect` 配
   `materialType = hdsMaterial.MaterialType.ADAPTIVE`。
+
+  ⚠️ **`.systemMaterial()` 有作用域限制（实测坑）**：该属性只在「导航标题栏组件 /
+  TabBar」内生效，挂在普通 `Row`/`Column` 上会被运行时判为 inert，**编译不报错、
+  看着设置了但什么都没渲染**，只在日志里留一行：
+
+  ```
+  W C03900/Ace: Material inactive: out of scope. Use component in navigation title bar or Tabbar.
+  ```
+
+  普通容器要做磨砂质感请用 `.backgroundBlurStyle(BlurStyle.COMPONENT_*)`（无作用域限制）。
+  排查手法：`hilog | grep -c 'Material inactive'`，应为 0。
 - **互动卡片**：新增 `extensionAbilities` 条目 `type: "liveForm"` + 实现
   `LiveFormExtensionAbility` + `$profile:form_config`（参考官方「实况窗/互动卡片」指南）。
+
+### HdsTabs 底部悬浮栏：三个实测坑
+
+已在 1.6.25 真机（MIA-AL00 / API 26 / HarmonyOS 7.0.0.109）跑通，形态为
+「底部悬浮磨砂胶囊 + 内容从栏下滑过 + 标题栏磨砂」，与商店主流 App 一致。
+
+1. **`barPosition` 必须写在构造参数里**，不能用 `.barPosition()` 属性设置器。
+   HDS_tabs 从 options 读取它，走属性会报：
+   ```
+   E HDS_tabs: GetTabBarPosition barPosition is not a number
+   ```
+   正确写法：`HdsTabs({ index: i, controller: c, barPosition: BarPosition.End })`
+
+2. **`barSideMargin` / `barBottomMargin` 在当前 SDK+设备组合下不生效**。
+   两者声明类型是 `Length`，但实测传裸数字（`12`）和带单位字符串（`'12vp'`）
+   **都会**被解析器拒绝：
+   ```
+   W HDS_tabs: ParseProp failed parse property barSideMargin
+   W HDS_tabs: ParseProp failed parse property barBottomMargin
+   ```
+   伴随 `!fsTabBarHandler_` 与 `hmos_hds_tab_pattern get attr tab_bar_mask_color_default error!`。
+   与其留一行无效配置加错误注释误导后人，**不如直接不传**，用 HDS 默认边距 ——
+   实测默认值已足够：胶囊 `x=58..1166`（屏宽 1224，左右各内缩 ~58px）、
+   `y=2493..2682`（底部留白 ~94px）。
+
+3. **`scrollable(false)` 是刻意的**，不是遗漏。页内已有大量手势
+   （节点列表滚动、视觉页 3D 球的 PanGesture 旋转），开启左右滑动切页会与
+   它们抢手势，导致 3D 转不动。9 个入口靠 `barMode(BarMode.Scrollable)`
+   在栏内横向滚动解决。
+
+另外记一条 ArkTS 通用坑：**成员名不能叫 `tabIndex`** —— `CustomComponent` 基类
+已有同名成员，撞名会编译失败（`Property 'tabIndex' ... is not assignable to the same
+property in base type 'CustomComponent'`）。本工程改用 `navIndex`；同类既有教训是
+NodesPage 里不能叫 `toolbar`。
 - **闪控窗**：先在 AGC 重新申请带 `acls: ["ohos.permission.FLOAT_VIEW","ohos.permission.USE_FLOAT_BALL"]`
   的调试/发布 profile（system_basic 级），替换 `com_xiaobai_clash.p7b` 后，再在 `module.json5`
   声明这两项权限，方可使用 `floatViewController.start()`。
@@ -64,7 +109,8 @@
 | 能力 | 实现 | 位置 |
 |---|---|---|
 | 交互 3D | ArkGraphics3D `Scene.load()` 空场景 + 内置 `SphereGeometry`（不依赖外部 glTF 资源）；`Component3D` 承载；PanGesture 旋转 / PinchGesture 缩放；球体体积由本次会话真实累计流量驱动，链路异常时压扁告警 | `services/Scene3D.ets`、`pages/VisualPage.ets` |
-| 沉浸光感 | API 26 `.systemMaterial()` + `uiMaterial.ImmersiveMaterial`，点击循环 ULTRA_THIN/THIN/REGULAR/THICK/ULTRA_THICK 五档；`getGlobalMaterialLevel()` / `isImmersiveMaterialSupported()` 做能力探测 | `pages/VisualPage.ets` |
+| 沉浸光感（应用外壳） | 底部悬浮页签栏 `HdsTabs` + `barFloatingStyle.systemMaterialEffect`（`hdsMaterial.MaterialType.ADAPTIVE` / `MaterialLevel.ADAPTIVE`，按设备算力自适应）；`barOverlap(true)` 让内容从栏下滑过；标题栏用 `.backgroundBlurStyle(COMPONENT_REGULAR)` 磨砂并浮在内容之上（Stack 布局）。**这是真正生效的沉浸光感** | `pages/Index.ets` |
+| 磨砂材质档位 | `.backgroundBlurStyle()`，点击循环 ULTRA_THIN/THIN/REGULAR/THICK/ULTRA_THICK 五档；`getGlobalMaterialLevel()` / `isImmersiveMaterialSupported()` 做能力探测并显示设备档位 | `pages/VisualPage.ets` |
 | HDS 视觉组件 | `HdsVisualComponent` + `HdsSceneController` 双边流光（`DUAL_EDGE_FLOW_LIGHT_WITH_BACKGROUND_MASK`） | `pages/VisualPage.ets` |
 | 小艺智能体 | `@InsightIntentEntry` 注册意图 `ControlVpn`（ToolsDomain / foreground）；`@InsightIntentEntity` 定义返回体 | `intents/VpnIntentEntry.ets` |
 
@@ -93,7 +139,11 @@
 
 - 导航新增「视觉」页签渲染正常；`Scene3D: scene built` + `VisualPage: 3d scene ready` 日志在位。
 - 拖动 3D 区域：`偏航 0° → 34°`（旋转生效）。
-- 连点材质卡 3 次：`常规 → 极薄`（五档循环并正确回绕）。
+- 连点材质卡 3 次：档位标签 `常规 → 极薄`（五档循环并正确回绕）。
+  ⚠️ 补记：这一条是在**旧写法**（`.systemMaterial()`）下测的，当时只证明了
+  `styleIndex` 数字在变 —— 而那个 API 在普通 Column 上是 inert 的，**材质根本没渲染**。
+  1.6.25 已改为 `.backgroundBlurStyle()`，档位差异现在真实可见。
+  教训：UI 状态数字变了 ≠ 视觉效果生效，必须查运行时日志确认（见下）。
 - 点「播放」触发流光，进程 pid 不变、无 JsError/crash（未崩溃）。
 - 设备材质档位实测为「柔和」（GENTLE），沉浸材质可用。
 - 小艺意图：`insight_intent.json` 清单生成正确（见上）。
@@ -104,7 +154,64 @@
 其中闪控窗有平台级阻断（`FLOAT_VIEW`/`USE_FLOAT_BALL` 为 system_basic，需带 acls 的 profile，
 直接声明会导致整包安装失败 `code:9568289`）。接入步骤见第三节。
 
-## 六、订阅下载 403 的真实成因（排查记录）
+## 六、1.6.25 导航壳重构：底部悬浮沉浸光感页签栏
+
+需求：「沉浸光感学其他软件的设计」。主流 App 的形态不是「往卡片上贴材质」，
+而是**把材质做在应用外壳上**：底部悬浮磨砂页签栏 + 内容从栏下滑过 + 标题栏磨砂。
+
+### 改动
+
+- `Index.ets` 外壳由 `Column{header, nav(横向按钮排), pageContent}` 改为
+  `Stack{ Column{ HdsTabs(9 个 TabContent) }, header }`；
+- 删除旧 `nav()` 横向按钮排，9 个入口全部进底部悬浮栏（`barMode(Scrollable)` 横向滚动）；
+- 标题栏改用 `.backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)` 并浮在内容之上
+  （`padding({top: HEADER_H})` 让内容从其下方滑过，磨砂才有内容可取）；
+- `VisualPage` 的材质卡由失效的 `.systemMaterial()` 改为 `.backgroundBlurStyle()`。
+
+### 为什么标题栏不用 systemMaterial
+
+实测日志给出的硬约束：
+
+```
+W C03900/Ace: Material inactive: out of scope.
+  Use component in navigation title bar or Tabbar.
+```
+
+`.systemMaterial()` 只在「导航标题栏组件 / TabBar」内生效。本工程的标题栏是个普通
+`Row`（不是 `HdsNavigation` 的 TitleBar），所以挂上去是 **inert**：编译通过、不报错、
+什么都不渲染。真正生效的只有底部 `HdsTabs` 的 `systemMaterialEffect`（它是 Tabbar）。
+
+因此：TabBar 用 `systemMaterialEffect`（真沉浸光感），标题栏/普通容器用
+`backgroundBlurStyle`（无作用域限制，同样有磨砂质感）。
+
+### 真机验证证据（MIA-AL00 · API 26 · HarmonyOS 7.0.0.109）
+
+运行时日志（修复前后对照，这是唯一可信的判据）：
+
+| 指标 | 修复前 | 修复后 |
+|---|---|---|
+| `grep -c 'Material inactive'` | 1（标题栏+材质卡都 inert） | **0** |
+| `grep -cE 'ParseProp failed\|barPosition is not a number'` | 3 | **0** |
+| JsError / crash / Fault | 无 | 无 |
+
+几何证据（`uitest dumpLayout`，屏宽 1224 / 高 2776）：
+
+- `TabBar bounds=[58,2493][1166,2682]` —— 左右各内缩 ~58px、底部留白 ~94px，
+  确为悬浮胶囊而非贴底通栏；
+- 9 个页签文本全部落在 `y=2571`，`设置` 项 `selected="true"`；
+- 内容行（如「核心版本」`y=2601..2648`）落在 TabBar 的 y 区间内 —— 证明
+  `barOverlap(true)` 生效，内容确实从栏下方滑过。
+
+交互证据：逐个点击 6 个页签（视觉/规则/应用/设置/节点/连接），标题栏标题
+**6/6 全部跟随切换正确**。
+
+> 排查备忘：验证脚本一度报 6/6 MISMATCH，是**脚本自身**的假阴性 ——
+> PS 5.1 以 ANSI/GBK 读取 BOM-less UTF-8，把脚本里写的「视觉」变成「瑙嗚」，
+> 而设备回读的标题（UTF-8 读）是正确的「视觉」，两者比对必然不等。
+> 这正是本工程 `publish-update.ps1` 里早就记下的同一个坑：
+> **PS 脚本内的中文注释/字面量必须存成带 BOM 的 UTF-8，或干脆只用 ASCII**。
+
+## 七、订阅下载 403 的真实成因（排查记录）
 
 用户报「导入配置报 HTTP 403」。排查过程值得留存，因为**第一直觉是错的**：
 

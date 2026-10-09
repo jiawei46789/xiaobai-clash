@@ -4,12 +4,21 @@
  * 三块能力，全部由**真实运行数据**驱动，不做模拟：
  *  1) 交互 3D —— ArkGraphics3D 的 Scene + 内置球体几何，PanGesture 拖动旋转、
  *     PinchGesture 双指缩放；球体大小随本次会话累计流量增长，链路异常时压扁。
- *  2) 沉浸光感 —— API 26 的 `.systemMaterial()` + `uiMaterial.ImmersiveMaterial`，
- *     点击卡片可循环 ULTRA_THIN→THIN→REGULAR→THICK→ULTRA_THICK 档位。
+ *  2) 磨砂材质 —— `.backgroundBlurStyle()`，点击卡片循环
+ *     ULTRA_THIN→THIN→REGULAR→THICK→ULTRA_THICK 五档。
+ *
+ *     这里刻意**不用** `.systemMaterial()`：该 API 有作用域限制，只在导航标题栏
+ *     组件或 TabBar 内生效，挂在普通 Column 上会被运行时判为 inert（日志
+ *     `Ace: Material inactive: out of scope.`），看着设置了实则什么都没渲染。
+ *     真正的沉浸光感材质在应用外壳上：底部页签栏走 `HdsTabs` 的
+ *     `barFloatingStyle.systemMaterialEffect`（hdsMaterial ADAPTIVE），见 Index.ets。
  *  3) HDS 流光 —— `HdsVisualComponent` 双边流光场景（UIDesignKit）。
  *
- * 设备算力不足时（isImmersiveMaterialSupported()=false 或 3D 构建失败）自动降级：
- * 材质卡片退回普通底色、3D 区显示提示文案，页面其余部分照常可用。
+ * `uiMaterial` 在本页只用于**能力探测**（isImmersiveMaterialSupported /
+ * getGlobalMaterialLevel），把设备算力档位显示出来，不再用于构造材质对象。
+ *
+ * 设备算力不足或 3D 构建失败时自动降级：3D 区显示提示文案，
+ * 页面其余部分照常可用。
  */
 import { ContentFrame } from '../common/ContentFrame';
 import { Fmt } from '../common/Format';
@@ -126,32 +135,30 @@ export struct VisualPage {
     this.zoomLabel = Math.round(h.zoom * 100) + '%';
   }
 
-  private currentStyle(): uiMaterial.ImmersiveStyle {
+  /**
+   * 当前档位对应的组件级磨砂样式。
+   *
+   * 不用 `.systemMaterial()` + `ImmersiveMaterial`：那个 API 有作用域限制，
+   * 只在「导航标题栏组件 / TabBar」内生效，挂在普通 Column 上会被运行时判为
+   * inert 并打印：
+   *   Ace: Material inactive: out of scope. Use component in navigation title bar or Tabbar.
+   * 也就是说旧写法在本卡片上**根本没渲染出材质**，档位切换只是改了个数字。
+   * 这里改用 `backgroundBlurStyle`（无作用域限制）才能真正看到五档差异。
+   */
+  private currentBlur(): BlurStyle {
     if (this.styleIndex <= 0) {
-      return uiMaterial.ImmersiveStyle.ULTRA_THIN;
+      return BlurStyle.COMPONENT_ULTRA_THIN;
     }
     if (this.styleIndex === 1) {
-      return uiMaterial.ImmersiveStyle.THIN;
+      return BlurStyle.COMPONENT_THIN;
     }
     if (this.styleIndex === 2) {
-      return uiMaterial.ImmersiveStyle.REGULAR;
+      return BlurStyle.COMPONENT_REGULAR;
     }
     if (this.styleIndex === 3) {
-      return uiMaterial.ImmersiveStyle.THICK;
+      return BlurStyle.COMPONENT_THICK;
     }
-    return uiMaterial.ImmersiveStyle.ULTRA_THICK;
-  }
-
-  private buildMaterial(): uiMaterial.Material | undefined {
-    if (!this.materialSupported) {
-      return undefined;
-    }
-    return new uiMaterial.ImmersiveMaterial({
-      style: this.currentStyle(),
-      colorInvert: true,
-      applyShadow: true,
-      interactive: true
-    });
+    return BlurStyle.COMPONENT_ULTRA_THICK;
   }
 
   private onPan(dx: number, dy: number): void {
@@ -201,7 +208,8 @@ export struct VisualPage {
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text'))
       Text('设备材质档位 ' + this.materialLevel + ' · 沉浸材质'
-        + (this.materialSupported ? '可用' : '不可用（已降级为普通底色）'))
+        + (this.materialSupported ? '可用' : '不可用')
+        + '（标题栏/底部页签栏为真正沉浸光感，本页卡片为组件级磨砂）')
         .fontSize(11)
         .fontColor($r('app.color.muted'))
     }
@@ -304,7 +312,7 @@ export struct VisualPage {
     .border({ width: 1, color: $r('app.color.line_soft') })
   }
 
-  /** 沉浸光感卡：systemMaterial + ImmersiveMaterial，点击循环档位 */
+  /** 磨砂材质卡：backgroundBlurStyle，点击循环五档（真实渲染，非演示数字） */
   @Builder
   private materialCard() {
     Column({ space: 10 }) {
@@ -314,7 +322,7 @@ export struct VisualPage {
           .fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.sub'))
         Blank()
-        Text(this.materialSupported ? '点击切换档位' : '设备不支持')
+        Text('点击切换档位')
           .fontSize(10)
           .fontColor($r('app.color.muted'))
       }
@@ -326,19 +334,17 @@ export struct VisualPage {
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text'))
         Text('连接状态 ' + (this.connected ? '已保护' : '未连接')
-          + ' · 材质由系统按设备算力自适应渲染')
+          + ' · 磨砂强度随档位递增')
           .fontSize(10)
           .fontColor($r('app.color.sub'))
       }
       .width('100%')
       .padding(16)
       .borderRadius(12)
-      .systemMaterial(this.buildMaterial())
-      .backgroundColor(this.materialSupported ? Color.Transparent : $r('app.color.surface2'))
+      // 不叠不透明 backgroundColor：否则模糊被盖死，等于白做
+      .backgroundBlurStyle(this.currentBlur())
+      .border({ width: 1, color: $r('app.color.line_soft') })
       .onClick(() => {
-        if (!this.materialSupported) {
-          return;
-        }
         this.styleIndex = (this.styleIndex + 1) % STYLE_LABELS.length;
       })
     }

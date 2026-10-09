@@ -1,4 +1,5 @@
 import { common, ConfigurationConstant, bundleManager } from '@kit.AbilityKit';
+import { HdsTabs, HdsTabsController, hdsMaterial } from '@kit.UIDesignKit';
 import { pasteboard, deviceInfo } from '@kit.BasicServicesKit';
 import { picker, fileIo as fs } from '@kit.CoreFileKit';
 import {
@@ -62,7 +63,24 @@ const NAV_ITEMS: NavItem[] = [
 @Entry
 @Component
 struct Index {
-  @State private selectedPage: string = 'home';
+  @State @Watch('onSelectedPageChange') private selectedPage: string = 'home';
+  /**
+   * 底部悬浮页签的当前索引。
+   *
+   * 名字避开 tabIndex：CustomComponent 基类已有同名成员，撞名会直接编译失败
+   * （同工程 NodesPage 里 toolbar 的既有教训）。
+   *
+   * 不直接让各处代码去改它，而是用 @Watch 从 selectedPage 单向派生：
+   * 工程里已有 8+ 处直接赋值 `this.selectedPage = 'xxx'`（如首页「切换节点」
+   * 跳节点页），改成双写极易漏。派生保证两者永不分叉。
+   */
+  @State private navIndex: number = 0;
+  private tabsCtrl: HdsTabsController = new HdsTabsController();
+  /**
+   * 标题栏高度（vp）。内容区按它留顶部内边距，标题栏浮在其上，
+   * 使列表滚动时从磨砂标题栏下方滑过 —— 与商店里主流 App 的形态一致。
+   */
+  private static readonly HEADER_H: number = 72;
   @State private connected: boolean = false;
   @State private connecting: boolean = false;
   @State private selectedNode: string = '香港 HK-01';
@@ -229,14 +247,84 @@ struct Index {
 
 
   build() {
-    Column() {
+    // Stack 而非 Column：标题栏必须浮在内容之上，内容才能从它下面滑过并
+    // 被磨砂模糊。若用 Column 上下排列，标题栏背后永远是窗口底色，
+    // 模糊取不到任何内容，视觉上等于没做。
+    Stack({ alignContent: Alignment.Top }) {
+      Column() {
+      // 底部悬浮沉浸光感页签栏（HdsTabs）：内容从栏下滑过（barOverlap），
+      // 材质按设备算力自适应（ADAPTIVE），与商店里主流 App 的形态一致。
+      //
+      // scrollable(false) 是刻意的：页内已有大量手势（节点列表、3D 视图的
+      // PanGesture 旋转），开启左右滑动切页会与之抢手势，导致 3D 转不动。
+      // 9 个入口靠 barMode(Scrollable) 在栏内横向滚动解决。
+      // barPosition 必须写在构造参数里：HDS_tabs 从 options 读取它，
+      // 走 `.barPosition()` 属性设置器会报
+      //   HDS_tabs: GetTabBarPosition barPosition is not a number
+      // 实测结果：写在属性上时底部栏位置退回默认值，不是我们要的 End。
+      HdsTabs({ index: this.navIndex, controller: this.tabsCtrl, barPosition: BarPosition.End }) {
+        ForEach(this.navItems(), (item: NavItem) => {
+          TabContent() {
+            this.pageFor(item.id)
+          }
+          .tabBar(item.label)
+        }, (item: NavItem) => item.id)
+      }
+      .layoutWeight(1)
+      .width('100%')
+      .barMode(BarMode.Scrollable)
+      .scrollable(false)
+      .barHeight(56)
+      .barOverlap(true)
+      // 刻意**不**传 barSideMargin / barBottomMargin：
+      // 两者声明类型是 Length，但实测传裸数字（12）和带单位字符串（'12vp'）
+      // **都会**被 HDS 解析器拒绝：
+      //   HDS_tabs: ParseProp failed parse property barSideMargin
+      //   HDS_tabs: ParseProp failed parse property barBottomMargin
+      // 即当前 SDK/设备组合下这两个属性不生效（伴随 !fsTabBarHandler_ 与
+      // hmos_hds_tab_pattern 主题属性缺失日志）。与其留一行无效配置加一条
+      // 错误注释误导后人，不如用 HDS 默认边距 —— 实测默认值已足够：
+      // 悬浮胶囊左右各内缩约 58px，底部留白，形态与主流 App 一致。
+      .barFloatingStyle({
+        gradientMask: { maskColor: $r('app.color.bg') },
+        systemMaterialEffect: {
+          materialType: hdsMaterial.MaterialType.ADAPTIVE,
+          materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+        }
+      })
+      .onChange((index: number) => {
+        const items: NavItem[] = this.navItems();
+        if (index >= 0 && index < items.length) {
+          this.selectedPage = items[index].id;
+          this.statusMessage = '';
+        }
+      })
+      }
+      .width('100%')
+      .height('100%')
+      .padding({ top: Index.HEADER_H })
+
+      // 标题栏最后绘制，位于最上层
       this.header()
-      this.nav()
-      this.pageContent()
     }
     .width('100%')
     .height('100%')
     .backgroundColor($r('app.color.bg'))
+  }
+
+  /** selectedPage → navIndex 的单向同步（见 navIndex 字段注释） */
+  private onSelectedPageChange(): void {
+    this.navIndex = this.indexOfPage(this.selectedPage);
+  }
+
+  private indexOfPage(id: string): number {
+    const items: NavItem[] = this.navItems();
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].id === id) {
+        return i;
+      }
+    }
+    return 0;
   }
 
   @Builder
@@ -262,42 +350,20 @@ struct Index {
         .backgroundColor(this.connected ? $r('app.color.green_soft') : $r('app.color.amber_soft'))
     }
     .width('100%')
-    .height(72)
+    .height(Index.HEADER_H)
     .padding({ left: 20, right: 20 })
     .border({ width: { bottom: 1 }, color: $r('app.color.line_soft') })
+    // 用 backgroundBlurStyle 而不是 systemMaterial：
+    // `.systemMaterial()` 有作用域限制，只在「导航标题栏组件 / TabBar」内生效，
+    // 挂在普通 Row 上会被运行时判为 inert 并打印
+    //   Ace: Material inactive: out of scope. Use component in navigation title bar or Tabbar.
+    // 这条实测日志是本工程改用 backgroundBlurStyle 的直接原因。
+    // 注意不要再叠不透明 backgroundColor，否则模糊被盖死、等于白做。
+    .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)
   }
-
   @Builder
-  private nav() {
-    Scroll() {
-      Row({ space: 6 }) {
-        ForEach(this.navItems(), (item: NavItem) => {
-          Button(item.label)
-            .type(ButtonType.Normal)
-            .fontSize(12)
-            .fontColor(this.selectedPage === item.id ? $r('app.color.text') : $r('app.color.sub'))
-            .backgroundColor(this.selectedPage === item.id ? $r('app.color.green_soft') : $r('app.color.surface'))
-            .border({ width: 1, color: this.selectedPage === item.id ? $r('app.color.green') : $r('app.color.line_soft') })
-            .borderRadius(8)
-            .height(36)
-            .padding({ left: 12, right: 12 })
-            .onClick(() => {
-              this.selectedPage = item.id;
-              this.statusMessage = '';
-            })
-        }, (item: NavItem) => item.id)
-      }
-      .padding({ left: 20, right: 20 })
-    }
-    .scrollable(ScrollDirection.Horizontal)
-    .scrollBar(BarState.Off)
-    .width('100%')
-    .height(52)
-  }
-
-  @Builder
-  private pageContent() {
-    if (this.selectedPage === 'home') {
+  private pageFor(id: string) {
+    if (id === 'home') {
       HomePage({
         connected: this.connected,
         connecting: this.connecting,
@@ -341,7 +407,7 @@ struct Index {
           this.exportReport();
         }
       })
-    } else if (this.selectedPage === 'onboard') {
+    } else if (id === 'onboard') {
       OnboardingPage({
         step: this.onboardingStep,
         choice: this.onboardingChoice,
@@ -365,7 +431,7 @@ struct Index {
           this.onboardingChoice = choice;
         }
       })
-    } else if (this.selectedPage === 'visual') {
+    } else if (id === 'visual') {
       VisualPage({
         downTotal: this.downTotal,
         upTotal: this.upTotal,
@@ -373,7 +439,7 @@ struct Index {
         selectedNode: this.selectedNode,
         connected: this.connected
       })
-    } else if (this.selectedPage === 'nodes') {
+    } else if (id === 'nodes') {
       NodesPage({
         groups: this.nodeGroups,
         selectedNode: this.selectedNode,
@@ -409,7 +475,7 @@ struct Index {
           this.importMessage = '节点列表已刷新';
         }
       })
-    } else if (this.selectedPage === 'connections') {
+    } else if (id === 'connections') {
       ConnectionsPage({
         connected: this.connected,
         coreConnections: this.realConnections,
@@ -420,7 +486,7 @@ struct Index {
           this.closeAllConnections();
         }
       })
-    } else if (this.selectedPage === 'rules') {
+    } else if (id === 'rules') {
       RulesPage({
         rules: this.realRules,
         mode: this.proxyMode,
@@ -429,7 +495,7 @@ struct Index {
           this.changeProxyMode(mode);
         }
       })
-    } else if (this.selectedPage === 'dns') {
+    } else if (id === 'dns') {
       DnsPage({
         dnsMode: this.dnsMode,
         coreDnsMode: this.dnsEnhancedMode,
@@ -438,7 +504,7 @@ struct Index {
           this.dnsMode = mode;
         }
       })
-    } else if (this.selectedPage === 'apps') {
+    } else if (id === 'apps') {
       AppsPage({
         filterEnabled: this.perAppProxyEnabled,
         excludedBundles: this.excludedApps,
@@ -454,7 +520,7 @@ struct Index {
           return this.addCustomApp(bundleName);
         }
       })
-    } else if (this.selectedPage === 'diagnostics') {
+    } else if (id === 'diagnostics') {
       DiagnosticsPage({
         events: this.recoveryEvents,
         coreRunning: this.coreRunning,
@@ -480,7 +546,7 @@ struct Index {
           this.statusMessage = '诊断记录已清空';
         }
       })
-    } else if (this.selectedPage === 'settings') {
+    } else if (id === 'settings') {
       SettingsPage({
         subscriptions: this.subProfiles,
         activeSubscriptionId: this.activeSubId,
