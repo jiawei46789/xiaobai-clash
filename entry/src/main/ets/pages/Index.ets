@@ -1,5 +1,13 @@
 import { common, ConfigurationConstant, bundleManager } from '@kit.AbilityKit';
-import { HdsTabs, HdsTabsController, hdsMaterial } from '@kit.UIDesignKit';
+import { uiMaterial } from '@kit.ArkUI';
+import {
+  HdsTabs,
+  HdsTabsController,
+  hdsMaterial,
+  SystemMaterialParams,
+  HdsTabsFloatingStyle,
+  HdsTabsBackgroundStyle
+} from '@kit.UIDesignKit';
 import { pasteboard, deviceInfo } from '@kit.BasicServicesKit';
 import { picker, fileIo as fs } from '@kit.CoreFileKit';
 import {
@@ -52,7 +60,9 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'onboard', label: '首次配置' },
   { id: 'nodes', label: '节点' },
   { id: 'visual', label: '视觉' },
-  { id: 'connections', label: '连接' },
+  // 注意不能也叫「连接」：与 home 重名会让底部页签出现两个一模一样的标签，
+  // 用户无法分辨当前在哪一页（pageTitle 里它叫「实时连接」，栏内取缩写）。
+  { id: 'connections', label: '实时' },
   { id: 'rules', label: '规则' },
   { id: 'dns', label: 'DNS' },
   { id: 'apps', label: '应用' },
@@ -81,6 +91,14 @@ struct Index {
    * 使列表滚动时从磨砂标题栏下方滑过 —— 与商店里主流 App 的形态一致。
    */
   private static readonly HEADER_H: number = 72;
+  /**
+   * 标题栏磨砂强度，按设备算力档位自适应（等价于 HDS 的 ADAPTIVE 语义）。
+   *
+   * 标题栏是普通 Row，`.systemMaterial()` 在它上面是 inert（见 header() 注释），
+   * 所以「自适应」必须自己映射到 `backgroundBlurStyle` 的档位上：
+   * 高算力给更厚的材质，低算力给更薄的，避免在低端机上白烧 GPU。
+   */
+  @State private headerBlur: BlurStyle = BlurStyle.COMPONENT_REGULAR;
   @State private connected: boolean = false;
   @State private connecting: boolean = false;
   @State private selectedNode: string = '香港 HK-01';
@@ -211,6 +229,7 @@ struct Index {
     this.appFilterStore = new AppFilterStore(context);
     this.coreStatusStore = new CoreStatusStore(context);
     this.onboardingDone = this.settingsStore.loadOnboardingDone();
+    this.headerBlur = this.adaptiveHeaderBlur();
     const settings = this.settingsStore.load();
     this.autoConnect = settings.autoConnect;
     this.networkRecover = settings.networkRecover;
@@ -276,6 +295,7 @@ struct Index {
       .scrollable(false)
       .barHeight(56)
       .barOverlap(true)
+      // 悬浮栏样式见 buildBarFloatingStyle()。
       // 刻意**不**传 barSideMargin / barBottomMargin：
       // 两者声明类型是 Length，但实测传裸数字（12）和带单位字符串（'12vp'）
       // **都会**被 HDS 解析器拒绝：
@@ -285,13 +305,7 @@ struct Index {
       // hmos_hds_tab_pattern 主题属性缺失日志）。与其留一行无效配置加一条
       // 错误注释误导后人，不如用 HDS 默认边距 —— 实测默认值已足够：
       // 悬浮胶囊左右各内缩约 58px，底部留白，形态与主流 App 一致。
-      .barFloatingStyle({
-        gradientMask: { maskColor: $r('app.color.bg') },
-        systemMaterialEffect: {
-          materialType: hdsMaterial.MaterialType.ADAPTIVE,
-          materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
-        }
-      })
+      .barFloatingStyle(this.buildBarFloatingStyle())
       .onChange((index: number) => {
         const items: NavItem[] = this.navItems();
         if (index >= 0 && index < items.length) {
@@ -312,9 +326,66 @@ struct Index {
     .backgroundColor($r('app.color.bg'))
   }
 
+  /**
+   * 底部悬浮栏样式。
+   *
+   * 必须拆成「显式类型的局部变量」再组装，不能写成多层嵌套字面量：
+   * ArkTS 的 arkts-no-untyped-obj-literals 规则不做跨层类型推断，嵌套写法
+   * 会一次性报三个 Object literal 错 + 一个 SystemMaterialParams 不可赋值。
+   *
+   * 已知取舍：**没有**配 `scrollEffectOpts`（滚动联动渐变模糊，
+   * `ScrollEffectType.IMMERSIVE_GRADIENT_BLUR`）。不是不想要，是在当前 SDK 组合下
+   * **类型上表达不出来**：
+   *  - HDS 的 `SystemMaterialParams.scrollEffectOpts` 声明为 `ScrollEffectOptions`，
+   *    而 `@hms.hds.hdsBaseComponent` 自身并未 import 该名字，于是编译器把它
+   *    绑定到 ArkUI 全局同名接口（declarations/navigation.d.ts:1664）；
+   *  - ArkUI 那个只有 3 个字段，**没有** `enableScrollEffect`，且其 `ScrollEffectType`
+   *    只有 COMMON_BLUR / GRADUAL_BLUR，**没有** IMMERSIVE_GRADIENT_BLUR；
+   *  - 就算把 HDS 版别名导入进来，类型仍对不上，报
+   *    `Type '{...}' is not assignable to type 'SystemMaterialParams'`。
+   * 因此这里只保留 materialType/materialLevel = ADAPTIVE（由系统按设备算力自适应）。
+   */
+  private buildBarFloatingStyle(): HdsTabsFloatingStyle {
+    const mask: HdsTabsBackgroundStyle = { maskColor: $r('app.color.bg') };
+    const material: SystemMaterialParams = {
+      materialType: hdsMaterial.MaterialType.ADAPTIVE,
+      materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+    };
+    const style: HdsTabsFloatingStyle = {
+      gradientMask: mask,
+      // 沉浸光感的「光」：悬浮胶囊边缘的高光色。不传的话 HDS 用中性光，
+      // 与应用主色无关；这里给品牌绿，边缘光与首页「已保护」状态同调。
+      lightColor: $r('app.color.green'),
+      // 悬浮胶囊向惯用手一侧偏移，单手操作时拇指更容易够到。
+      adaptToHandedness: true,
+      systemMaterialEffect: material
+    };
+    return style;
+  }
+
   /** selectedPage → navIndex 的单向同步（见 navIndex 字段注释） */
   private onSelectedPageChange(): void {
     this.navIndex = this.indexOfPage(this.selectedPage);
+  }
+
+  /**
+   * 把设备算力档位映射成标题栏磨砂强度。
+   *
+   * 取不到档位（老设备/API 不全）时退回 REGULAR，即改动前的默认观感。
+   */
+  private adaptiveHeaderBlur(): BlurStyle {
+    try {
+      const level: uiMaterial.MaterialLevel = uiMaterial.getGlobalMaterialLevel();
+      if (level === uiMaterial.MaterialLevel.EXQUISITE) {
+        return BlurStyle.COMPONENT_THICK;
+      }
+      if (level === uiMaterial.MaterialLevel.SMOOTH) {
+        return BlurStyle.COMPONENT_THIN;
+      }
+      return BlurStyle.COMPONENT_REGULAR;
+    } catch (_err) {
+      return BlurStyle.COMPONENT_REGULAR;
+    }
   }
 
   private indexOfPage(id: string): number {
@@ -352,14 +423,20 @@ struct Index {
     .width('100%')
     .height(Index.HEADER_H)
     .padding({ left: 20, right: 20 })
-    .border({ width: { bottom: 1 }, color: $r('app.color.line_soft') })
     // 用 backgroundBlurStyle 而不是 systemMaterial：
     // `.systemMaterial()` 有作用域限制，只在「导航标题栏组件 / TabBar」内生效，
     // 挂在普通 Row 上会被运行时判为 inert 并打印
     //   Ace: Material inactive: out of scope. Use component in navigation title bar or Tabbar.
     // 这条实测日志是本工程改用 backgroundBlurStyle 的直接原因。
     // 注意不要再叠不透明 backgroundColor，否则模糊被盖死、等于白做。
-    .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)
+    //
+    // 底部描边也一并去掉了：磨砂材质本身就定义了边界，再叠一条 1px 实线
+    // 会跟模糊“打”，看着发脏 —— 商店里的正规 App 在磨砂标题栏上都不画这条线。
+    //
+    // policy 用 ALWAYS_ACTIVE 而非默认的 FOLLOWS_WINDOW_ACTIVE_STATE：
+    // 后者在窗口失活时会把材质降级成 inactiveColor（一块纯色），
+    // 下拉通知中心或分屏时标题栏会“掉材质”闪一下。
+    .backgroundBlurStyle(this.headerBlur, { policy: BlurStyleActivePolicy.ALWAYS_ACTIVE })
   }
   @Builder
   private pageFor(id: string) {
