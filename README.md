@@ -16,6 +16,9 @@ HarmonyOS NEXT 原生 Clash/Mihomo VPN 客户端（HAP），在 [LIAN CONNECT](h
 | 订阅导入宽容化 | Clash YAML 识别不再要求首行前缀：注释开头、任意顶层键、base64 包 YAML、纯 proxy-providers 均可导入；节点计数只统计 `proxies:` 段 |
 | 节点页订阅切换 | 多订阅时订阅条出现「切换」面板，一键换当前订阅 |
 | 订阅剩余流量识别 | 读取订阅响应的 `subscription-userinfo` 响应头（机场通用约定），在节点页展示剩余 / 已用 / 总量、进度条与到期时间；每 5 分钟自动轻量刷新用量（只读响应头，不重载核心）；设置页订阅列表与首页链路状态同步显示 |
+| 视觉与交互 3D + 沉浸光感 | 新增「视觉」页签：ArkGraphics3D 实时 3D 球体（拖动旋转 / 双指缩放，体积随本次会话累计流量变化、链路异常时压扁告警）；API 26 沉浸光感材质 `.systemMaterial()` + `ImmersiveMaterial`（点击循环 极薄/薄/常规/厚/极厚 五档）；HDS 双边流光。设备算力不足时自动降级，不影响主功能 |
+| 小艺智能体（InsightIntent） | `@InsightIntentEntry` 将「连接/断开加速」注册为系统意图 `ControlVpn`（ToolsDomain，foreground 模式，含 llmDescription/keywords 供大模型理解）。意图执行器不直接操作 VPN，而是通过 AppStorage 信箱把动作交给主界面走既有 `toggleVpn()` 链路，保持「VPN 只有一个开关入口」；连接类动作仍需用户点按确认（符合纯手动开关约束） |
+| 订阅下载链路修复 | 修复导入订阅报 403/下载失败：① 真实错误码不再被吞（HarmonyOS `BusinessError` 不是 `Error` 实例，旧代码 `String(err)` 只得到 `[object Object]`），现在直接报出如 `2300999` + 人话提示；② 新增**内核本地代理兜底**：直连被 SNI 重置（大陆访问 Cloudflare 前置的机场域名常见）时，自动改走 mihomo 本地混合端口 `127.0.0.1:7890` 重试；③ 网络层错误不再拿 10 个 UA 各等 30 秒（导入可能卡死几分钟），立刻切链路；④ 仍保留 UA 回退链应对面板 WAF 挑客户端导致的真 403/406/451 |
 | API 26 + 能力依赖/权限声明 | `compatibleSdkVersion` 升至 `26.0.0`；为视觉 AI / 3DGS / 沉浸光感 / 互动卡片 / 闪控窗 五类能力补齐权限声明（CAMERA / ACCELEROMETER / GYROSCOPE / VIBRATE）；映射与限制见 `docs/CAPABILITIES-API26.md` |
 
 ## 构建

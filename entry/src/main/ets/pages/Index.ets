@@ -26,6 +26,8 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Fmt } from '../common/Format';
 import { HomePage } from './HomePage';
 import { NodesPage } from './NodesPage';
+import { VisualPage } from './VisualPage';
+import { INTENT_VPN_ACTION_KEY } from '../intents/VpnIntentEntry';
 import { ConnectionsPage } from './ConnectionsPage';
 import { RulesPage } from './RulesPage';
 import { DnsPage } from './DnsPage';
@@ -48,6 +50,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'home', label: '连接' },
   { id: 'onboard', label: '首次配置' },
   { id: 'nodes', label: '节点' },
+  { id: 'visual', label: '视觉' },
   { id: 'connections', label: '连接' },
   { id: 'rules', label: '规则' },
   { id: 'dns', label: 'DNS' },
@@ -216,6 +219,8 @@ struct Index {
     if (active !== null && active !== undefined) {
       this.applyProfile(active);
     }
+    // 由小艺意图拉起时，消费投递的动作
+    this.consumeIntentAction();
     // 用户要求（1.6.2）：VPN 只允许手动开/关。
     // 原先此处有两条启动自动连接路径（autoConnect / want_connected），已全部切断；
     // 隧道意外中断时界面只标记断开并提示，等用户手动点连接。
@@ -359,6 +364,14 @@ struct Index {
         onChoice: (choice: string): void => {
           this.onboardingChoice = choice;
         }
+      })
+    } else if (this.selectedPage === 'visual') {
+      VisualPage({
+        downTotal: this.downTotal,
+        upTotal: this.upTotal,
+        healthState: this.healthState,
+        selectedNode: this.selectedNode,
+        connected: this.connected
       })
     } else if (this.selectedPage === 'nodes') {
       NodesPage({
@@ -590,6 +603,8 @@ struct Index {
   }
 
   onPageShow(): void {
+    // 意图可能在应用已在前台时投递（ability 复用走 onNewWant），这里补一次消费
+    this.consumeIntentAction();
     // 开一段容忍期：锁屏期间心跳多半是停更的，不能一回来就判死。
     this.resumeGraceUntil = Date.now() + this.resumeGraceMs();
     hilog.info(DOMAIN, TAG, 'resume from background, grace=%{public}dms',
@@ -1057,6 +1072,40 @@ struct Index {
       this.connSignature = '';
       this.pushEvent('已关闭全部连接', '所有活跃连接已断开', 'info');
     }
+  }
+
+  /**
+   * 消费小艺智能体投递的动作（见 intents/VpnIntentEntry.ets）。
+   *
+   * 意图执行器只把动作写进 AppStorage 信箱，真正的开关仍由这里按既有链路执行，
+   * 保证「VPN 开关只有一个事实来源」。
+   *
+   * 连接与断开的处理不对称，这是有意的：本工程自 1.6.2 起有一条用户定的硬约束
+   * 「VPN 只允许手动开/关」，自动连接路径已被全部切断。所以：
+   *  - disconnect：安全，直接执行（关掉隧道不会带来风险）；
+   *  - connect：不擅自建链，只把界面带到首页并提示一键连接，由用户点按确认。
+   */
+  private consumeIntentAction(): void {
+    const raw: string | undefined = AppStorage.get<string>(INTENT_VPN_ACTION_KEY);
+    if (raw === undefined || raw.length === 0) {
+      return;
+    }
+    // 立即清空信箱，避免下次回前台重复执行同一动作
+    AppStorage.setOrCreate(INTENT_VPN_ACTION_KEY, '');
+    this.selectedPage = 'home';
+    hilog.info(DOMAIN, TAG, 'consume intent action=%{public}s', raw);
+    if (raw === 'disconnect') {
+      if (this.connected) {
+        this.pushEvent('小艺意图', '语音请求断开加速，已执行', 'info');
+        this.toggleVpn();
+      } else {
+        this.statusMessage = '当前未连接，无需断开';
+        this.pushEvent('小艺意图', '语音请求断开，但当前未连接', 'info');
+      }
+      return;
+    }
+    this.statusMessage = '小艺请求连接加速 · 点按 VPN 按钮即可开启';
+    this.pushEvent('小艺意图', '语音请求连接加速，等待手动确认', 'info');
   }
 
   private pushEvent(title: string, desc: string, type: string): void {
