@@ -26,7 +26,27 @@
     },
     {
       "name": "perm_bundle_info",
-      "value": "用于按包名查询应用名称，展示分应用代理列表"
+      "value": "用于按包名查询应用名称，展示分应用加速列表"
+    },
+    {
+      "name": "perm_camera",
+      "value": "用于视觉 AI 能力（图像分析 / 超分 / 主体分割）的取图"
+    },
+    {
+      "name": "perm_motion",
+      "value": "用于 3DGS / AR 空间重建时的设备姿态与运动感知"
+    },
+    {
+      "name": "perm_vibrate",
+      "value": "用于沉浸光感与互动卡片的触感反馈"
+    },
+    {
+      "name": "perm_float_view",
+      "value": "用于闪控窗（应用内/跨应用悬浮的持续任务窗口）"
+    },
+    {
+      "name": "perm_float_ball",
+      "value": "用于闪控球与闪控窗的绑定切换"
     }
   ]
 }

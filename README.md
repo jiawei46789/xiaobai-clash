@@ -16,6 +16,7 @@ HarmonyOS NEXT 原生 Clash/Mihomo VPN 客户端（HAP），在 [LIAN CONNECT](h
 | 订阅导入宽容化 | Clash YAML 识别不再要求首行前缀：注释开头、任意顶层键、base64 包 YAML、纯 proxy-providers 均可导入；节点计数只统计 `proxies:` 段 |
 | 节点页订阅切换 | 多订阅时订阅条出现「切换」面板，一键换当前订阅 |
 | 订阅剩余流量识别 | 读取订阅响应的 `subscription-userinfo` 响应头（机场通用约定），在节点页展示剩余 / 已用 / 总量、进度条与到期时间；每 5 分钟自动轻量刷新用量（只读响应头，不重载核心）；设置页订阅列表与首页链路状态同步显示 |
+| API 26 + 能力依赖/权限声明 | `compatibleSdkVersion` 升至 `26.0.0`；为视觉 AI / 3DGS / 沉浸光感 / 互动卡片 / 闪控窗 五类能力补齐权限声明（CAMERA / ACCELEROMETER / GYROSCOPE / VIBRATE）；映射与限制见 `docs/CAPABILITIES-API26.md` |
 
 ## 构建
 

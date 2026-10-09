@@ -44,7 +44,55 @@
           ],
           "when": "always"
         }
+      },
+      // ===== 以下为「视觉AI / 3DGS / 沉浸光感 / 互动卡片 / 闪控窗」能力所需的权限声明 =====
+      {
+        "name": "ohos.permission.CAMERA",
+        "reason": "$string:perm_camera",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
+        "name": "ohos.permission.ACCELEROMETER",
+        "reason": "$string:perm_motion",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "always"
+        }
+      },
+      {
+        "name": "ohos.permission.GYROSCOPE",
+        "reason": "$string:perm_motion",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "always"
+        }
+      },
+      {
+        "name": "ohos.permission.VIBRATE",
+        "reason": "$string:perm_vibrate",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility",
+            "LianVpnAbility"
+          ],
+          "when": "always"
+        }
       }
+      // 闪控窗（@ohos.window.floatView）/ 闪控球（floatingBall，HarmonyOS 7 / API 26）：
+      // 对应权限 FLOAT_VIEW（user_grant, system_basic）与 USE_FLOAT_BALL（system_grant, system_basic）
+      // **不能在 requestPermissions 直接声明**——本工程签名 profile 的 APL 为 normal 且无 acls，
+      // 装机时 grant 校验会直接失败（实测 code:9568289 grant request permissions failed）。
+      // 如需启用闪控窗，必须改用带 acls（FLOAT_VIEW/USE_FLOAT_BALL）的 system_basic 级 profile；
+      // 详见 docs/CAPABILITIES-API26.md。
     ],
     "pages": "$profile:main_pages",
     "abilities": [
