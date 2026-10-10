@@ -251,12 +251,15 @@ curl.exe -x http://127.0.0.1:17890 -A "lian-connect/0.01" -D hdr.txt -o body.txt
 
 在 1.6.25 底部悬浮栏的基础上做体验打磨，共 6 处。
 
+> ⚠️ **其中 `adaptToHandedness: true` 已于 1.6.27 回退**，原因见第九节。
+> 下表保留它作为历史记录，但**当前代码里没有这一项**。
+
 ### 优化项
 
 | 改动 | 为什么 |
 |---|---|
 | `lightColor: $r('app.color.green')` | 悬浮胶囊边缘高光默认是 HDS 中性光，与应用主色无关。给品牌绿后，边缘光与首页「已保护」状态同调 |
-| `adaptToHandedness: true` | 胶囊向惯用手一侧偏移，单手操作时拇指更容易够到 |
+| ~~`adaptToHandedness: true`~~ **（1.6.27 已回退）** | 原意是「胶囊向惯用手一侧偏移，单手操作时拇指更容易够到」。**实测是负优化**：SDK 文档原文 "Sets whether the component follows the hand display" —— 它让整个悬浮胶囊跟着手位滑动，页签文字长在胶囊里就一起漂，即用户反馈的「沉浸光感的字跟着动」。详见第九节 |
 | 标题栏磨砂按算力自适应 | `getGlobalMaterialLevel()` → `COMPONENT_THICK / REGULAR / THIN`。之前写死 REGULAR，高算力机器上材质偏薄、低端机上又白烧 GPU |
 | `BlurStyleActivePolicy.ALWAYS_ACTIVE` | 默认 `FOLLOWS_WINDOW_ACTIVE_STATE` 在窗口失活时会把材质降级成 `inactiveColor`（一块纯色），下拉通知中心或分屏时标题栏会「掉材质」闪一下 |
 | 去掉标题栏 1px 硬描边 | 磨砂材质自带边界，再叠一条实线会跟模糊「打架」，看着发脏 |
@@ -335,3 +338,47 @@ Get-ChildItem "$SDK\openharmony\ets\build-tools\ets-loader\declarations" -Filter
 > 残余的 `!fsTabBarHandler_`、`hmos_hds_tab_pattern get attr ... error!`、
 > `GetAsset failed: resources/styles/default.json` 均为框架级噪音，1.6.25 起就存在，
 > 与本工程配置无关。
+
+## 九、1.6.27：回退 `adaptToHandedness`（沉浸光感上的字不要跟着动）
+
+用户反馈：「沉浸光感的字不要跟着动」。
+
+### 根因
+
+1.6.26 为了「单手操作时拇指更容易够到」而开了 `adaptToHandedness: true`。
+但 SDK 对该属性的原文描述是：
+
+> *Sets whether the component follows the hand display.*
+
+即它让**整个悬浮胶囊跟着手位移动**。页签文字是胶囊的子节点，胶囊一滑动，
+文字就跟着漂 —— 导航栏作为定位基准却自己移位，这是负优化。
+
+修法就是删掉该项（回到默认 `false`），**不要**试图用 `animationDuration(0)` 去压制：
+那只会让位移变成立刻跳变，位置依旧不固定，问题没解决。
+
+单手可达性交给 `barMode(BarMode.Scrollable)` 的横向滚动就够了 —— 9 个入口本来就需要它。
+
+### 真机验证（MIA-AL00 · API 26）
+
+判定方法是「两次 dump 对比几何」，而不是看单次快照：
+
+| 指标 | 结果 |
+|---|---|
+| TabBar bounds（dump#1 vs dump#2，间隔 8s） | `[58,2493][1166,2682]` —— **完全一致** |
+| 9 个标签 x 坐标 | `125,247,369,491,613,735,858,980,1102` —— **完全一致** |
+| `Material inactive` | 0 |
+| `ParseProp` / `barPosition` 错误 | 0 |
+| 本应用 crash 签名（JsError/CppCrash/AppFreeze/SIGSEGV） | 无，pid 全程稳定 |
+
+> 排查备忘：`hilog | grep -icE 'JsError|crash|Fault'` 一度返回 **181**，看着像大面积崩溃。
+> 实际全是系统进程（resource_schedule_service / cloudfileservice / batterycare 等）的噪音，
+> 只有 2 条带我们的包名 —— 且是**桌面 AI 推荐列表**在列举已装应用
+> （`recItems: ...com.xiaobai.clash...`），不是我们的日志。
+> 教训：用关键字数「崩溃」必须**先按包名过滤再看签名**，裸 grep 计数没有意义。
+
+### 通用教训
+
+**开一个属性前先读它的 SDK 原文，别凭名字猜语义。**
+`adaptToHandedness` 听上去像「适配手持方式」这种无害的辅助项，实际是「组件跟随手位移动」。
+名字温和的属性也可能带来位移/动画副作用 —— 尤其当它是 1.6.26 新加、且当时只验证了
+「日志干净 + 几何正确」却没验证「几何**稳定**」时，很容易漏掉。

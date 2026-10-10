@@ -356,8 +356,15 @@ struct Index {
       // 沉浸光感的「光」：悬浮胶囊边缘的高光色。不传的话 HDS 用中性光，
       // 与应用主色无关；这里给品牌绿，边缘光与首页「已保护」状态同调。
       lightColor: $r('app.color.green'),
-      // 悬浮胶囊向惯用手一侧偏移，单手操作时拇指更容易够到。
-      adaptToHandedness: true,
+      // 刻意**不**开 adaptToHandedness（默认 false）。
+      //
+      // 1.6.26 曾把它设为 true，理由是「胶囊向惯用手偏移、单手更好够」。
+      // 实测后果：SDK 文档原文是 "Sets whether the component follows the hand
+      // display" —— 它会让整个悬浮胶囊跟着手位**滑动**，而页签文字长在胶囊里，
+      // 于是文字一起漂。用户反馈「沉浸光感的字不要跟着动」即指此。
+      //
+      // 导航栏是定位基准，不该因为握持方式自己移位；单手可达性交给
+      // barMode(Scrollable) 的横向滚动去解决就够了。
       systemMaterialEffect: material
     };
     return style;
