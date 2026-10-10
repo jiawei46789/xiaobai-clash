@@ -80,8 +80,14 @@
 
 3. **`scrollable(false)` 是刻意的**，不是遗漏。页内已有大量手势
    （节点列表滚动、视觉页 3D 球的 PanGesture 旋转），开启左右滑动切页会与
-   它们抢手势，导致 3D 转不动。9 个入口靠 `barMode(BarMode.Scrollable)`
-   在栏内横向滚动解决。
+   它们抢手势，导致 3D 转不动。
+
+4. **`barMode` 必须用 `Fixed`，不能用 `Scrollable`**。
+   `Scrollable` 会自动滚动栏以居中当前页签，结果**全部标签随选中项整体位移**
+   （真机实测 x 起点 125→89→53），即用户可见的「沉浸光感上的字跟着动」。
+   `Fixed` 则等分栏宽、永不滚动：栏宽 1108px / 9 ≈ 123px 每格，3 字标签绰绰有余。
+   注意别把 `barMode`（栏内页签如何排布）与 `scrollable`（页面能否左右滑切）混为一谈，
+   两者互不相关。详见第九节。
 
 另外记一条 ArkTS 通用坑：**成员名不能叫 `tabIndex`** —— `CustomComponent` 基类
 已有同名成员，撞名会编译失败（`Property 'tabIndex' ... is not assignable to the same
@@ -163,7 +169,8 @@ NodesPage 里不能叫 `toolbar`。
 
 - `Index.ets` 外壳由 `Column{header, nav(横向按钮排), pageContent}` 改为
   `Stack{ Column{ HdsTabs(9 个 TabContent) }, header }`；
-- 删除旧 `nav()` 横向按钮排，9 个入口全部进底部悬浮栏（`barMode(Scrollable)` 横向滚动）；
+- 删除旧 `nav()` 横向按钮排，9 个入口全部进底部悬浮栏（当时用 `barMode(Scrollable)` 横向滚动；
+  **该选择已于 1.6.28 改为 `Fixed`** —— Scrollable 会让标签随选中页签整体位移，见第九节）；
 - 标题栏改用 `.backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)` 并浮在内容之上
   （`padding({top: HEADER_H})` 让内容从其下方滑过，磨砂才有内容可取）；
 - `VisualPage` 的材质卡由失效的 `.systemMaterial()` 改为 `.backgroundBlurStyle()`。
@@ -253,6 +260,7 @@ curl.exe -x http://127.0.0.1:17890 -A "lian-connect/0.01" -D hdr.txt -o body.txt
 
 > ⚠️ **其中 `adaptToHandedness: true` 已于 1.6.27 回退**，原因见第九节。
 > 下表保留它作为历史记录，但**当前代码里没有这一项**。
+> 另：`barMode` 已于 1.6.28 由 `Scrollable` 改为 `Fixed`（标签位移的真因，见第九节）。
 
 ### 优化项
 
@@ -339,36 +347,62 @@ Get-ChildItem "$SDK\openharmony\ets\build-tools\ets-loader\declarations" -Filter
 > `GetAsset failed: resources/styles/default.json` 均为框架级噪音，1.6.25 起就存在，
 > 与本工程配置无关。
 
-## 九、1.6.27：回退 `adaptToHandedness`（沉浸光感上的字不要跟着动）
+## 九、1.6.27→1.6.28：底部页签文字跟着动（真因与一次误判）
 
-用户反馈：「沉浸光感的字不要跟着动」。
+用户反馈：「沉浸光感的字不要跟着动」→ 1.6.27 修完仍动 → 再次反馈「底部沉浸光感的字固定不要跟着动」。
 
-### 根因
+### ❌ 1.6.27 的误判（已回退，但**不是**根因）
 
-1.6.26 为了「单手操作时拇指更容易够到」而开了 `adaptToHandedness: true`。
-但 SDK 对该属性的原文描述是：
+当时把矛头指向 1.6.26 新加的 `adaptToHandedness: true`，依据是 SDK 原文：
 
 > *Sets whether the component follows the hand display.*
 
-即它让**整个悬浮胶囊跟着手位移动**。页签文字是胶囊的子节点，胶囊一滑动，
-文字就跟着漂 —— 导航栏作为定位基准却自己移位，这是负优化。
+看名字确实像「组件跟着手位移动」。删掉后我宣称修好了，**但这是错的** —— 用户装上
+1.6.27 后文字照旧在动。
 
-修法就是删掉该项（回到默认 `false`），**不要**试图用 `animationDuration(0)` 去压制：
-那只会让位移变成立刻跳变，位置依旧不固定，问题没解决。
+误判的方法论缺陷（比误判本身更值得记）：我用「相隔 8 秒的两次静止 dump 对比几何」
+当验证，TabBar bounds 与标签 x 坐标都完全一致，于是判「稳定」。
+**可位移只在「切页签」这个交互瞬间发生** —— 静止状态永远测不出来。
 
-单手可达性交给 `barMode(BarMode.Scrollable)` 的横向滚动就够了 —— 9 个入口本来就需要它。
+> `adaptToHandedness` 的回退本身仍然保留：导航栏作为定位基准不该因握持方式自己移位，
+> 这个理由独立成立。但必须说清：**它不是文字漂移的原因**。
 
-### 真机验证（MIA-AL00 · API 26）
+### ✅ 1.6.28 的真因：`BarMode.Scrollable` 的自动居中滚动
 
-判定方法是「两次 dump 对比几何」，而不是看单次快照：
+正确的测量方法是**跨页签切换**采集标签 x 坐标。1.6.27（Scrollable）实测：
+
+| 选中页签 | 标签 x 起点 | 相对偏移 |
+|---|---|---|
+| 连接 / 视觉 / 节点 | **125**, 247, 369… | 0 |
+| 规则 | **89**, 211, 333… | −36 |
+| 应用 / 设置 | **53**, 175, 297… | −72 |
+
+关键观察：**TabBar 外框始终 `[58,2493][1166,2682]` 一动不动，动的只有里面的标签。**
+这就是 `BarMode.Scrollable` 的行为 —— 栏会自动滚动以把当前页签居中，滚动偏移一变，
+**9 个标签被整体拖着走**。外框不动而内容动，也反证了它与 `adaptToHandedness` 无关。
+
+修法：改用 `BarMode.Fixed`（9 个页签等分栏宽、永不滚动）。栏宽 1108px / 9 ≈ 123px 每格，
+标签最长 3 字（fontSize 12）远小于格宽，不截断。
+
+注意两个概念互不相关，别混：
+- `barMode(...)` = **栏内**页签如何排布（Fixed 等分 / Scrollable 可滚动）
+- `scrollable(false)` = **页面**能否左右滑动切页（此处刻意关闭，避免与 3D 手势抢）
+
+### 真机验证（MIA-AL00 · API 26 · 1.6.28）
+
+跨 6 次页签切换采集，标签 x 坐标**全程完全一致**：
+
+```
+125,239,353,467,581,695,809,923,1037   ← 等距 114px，6 次采样零漂移
+```
 
 | 指标 | 结果 |
 |---|---|
-| TabBar bounds（dump#1 vs dump#2，间隔 8s） | `[58,2493][1166,2682]` —— **完全一致** |
-| 9 个标签 x 坐标 | `125,247,369,491,613,735,858,980,1102` —— **完全一致** |
+| 标签 x 坐标（跨 6 次切换） | **完全一致**（1.6.27 为 125→89→53 漂移） |
+| TabBar bounds | `[58,2493][1166,2682]` 不变 |
 | `Material inactive` | 0 |
 | `ParseProp` / `barPosition` 错误 | 0 |
-| 本应用 crash 签名（JsError/CppCrash/AppFreeze/SIGSEGV） | 无，pid 全程稳定 |
+| 本应用 crash 签名（JsError/CppCrash/AppFreeze/SIGSEGV） | 无，pid 62623 全程稳定 |
 
 > 排查备忘：`hilog | grep -icE 'JsError|crash|Fault'` 一度返回 **181**，看着像大面积崩溃。
 > 实际全是系统进程（resource_schedule_service / cloudfileservice / batterycare 等）的噪音，
@@ -378,7 +412,9 @@ Get-ChildItem "$SDK\openharmony\ets\build-tools\ets-loader\declarations" -Filter
 
 ### 通用教训
 
-**开一个属性前先读它的 SDK 原文，别凭名字猜语义。**
-`adaptToHandedness` 听上去像「适配手持方式」这种无害的辅助项，实际是「组件跟随手位移动」。
-名字温和的属性也可能带来位移/动画副作用 —— 尤其当它是 1.6.26 新加、且当时只验证了
-「日志干净 + 几何正确」却没验证「几何**稳定**」时，很容易漏掉。
+1. **「静止快照一致」不等于「稳定」。** 位移类问题必须在**触发交互的时序上**采样
+   （切页签、滚动、展开收起），否则一定漏。本次 8 秒静止对比给了假阳性。
+2. **用户说「还在动」时，先怀疑自己的验证方法，而不是怀疑用户。** 1.6.27 我拿着
+   一份看着很硬的表格宣布修好了，其实那份表格的测量方式根本测不到该缺陷。
+3. **开属性前先读 SDK 原文**：`adaptToHandedness` 名字温和，实际语义是「跟随手位移动」。
+   读原文能避免误开，但**不能替代正确的验证** —— 这次读了原文仍误判，因为缺的是测量方法。

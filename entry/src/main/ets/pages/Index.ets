@@ -276,7 +276,8 @@ struct Index {
       //
       // scrollable(false) 是刻意的：页内已有大量手势（节点列表、3D 视图的
       // PanGesture 旋转），开启左右滑动切页会与之抢手势，导致 3D 转不动。
-      // 9 个入口靠 barMode(Scrollable) 在栏内横向滚动解决。
+      // 9 个入口靠 barMode(Fixed) 等分栏宽一次性排开（见下方说明），
+      // 不需要横向滚动 —— 而横向滚动恰恰会让标签跟着动。
       // barPosition 必须写在构造参数里：HDS_tabs 从 options 读取它，
       // 走 `.barPosition()` 属性设置器会报
       //   HDS_tabs: GetTabBarPosition barPosition is not a number
@@ -291,7 +292,22 @@ struct Index {
       }
       .layoutWeight(1)
       .width('100%')
-      .barMode(BarMode.Scrollable)
+      // barMode 必须用 Fixed，不能用 Scrollable。
+      //
+      // Scrollable 会让栏自动滚动以居中当前页签，滚动偏移一变，**全部标签
+      // 跟着整体位移** —— 就是用户反馈的「底部沉浸光感的字跟着动」。
+      // 真机实测证据（uitest dumpLayout，切页签后对比标签 x 坐标）：
+      //   TabBar 外框始终 [58,2493][1166,2682] 不动，但标签起点随选中项漂移：
+      //     连接/视觉/节点 → 125,247,369...
+      //     规则           →  89,211,333...   （-36）
+      //     应用/设置       →  53,175,297...   （-72）
+      // 外框不动而内容动，所以这不是 adaptToHandedness 造成的（那项已回退）。
+      //
+      // Fixed 让 9 个页签等分栏宽、永不滚动：栏宽 1108px / 9 ≈ 123px 每格，
+      // 标签最长 3 字（fontSize 12）远小于格宽，不会截断。
+      // 页内左右滑动切页仍由 scrollable(false) 关闭（避免与 3D 手势抢），
+      // 两者互不相关。
+      .barMode(BarMode.Fixed)
       .scrollable(false)
       .barHeight(56)
       .barOverlap(true)
