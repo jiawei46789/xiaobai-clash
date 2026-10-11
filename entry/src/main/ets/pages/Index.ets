@@ -70,6 +70,27 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'settings', label: '设置' }
 ];
 
+/**
+ * 底部悬浮栏只放 5 个主入口。
+ *
+ * 为什么不是 9 个（真机实测结论）：
+ *  - Fixed 模式：9 格均分后每格 ~123px，文字被截断成省略号「…」
+ *    （用户反馈「字看不到了，只有点」）；
+ *  - Scrollable 模式：不截断，但栏会为居中当前页签自动滚动，
+ *    把全部标签整体拖着走（实测 x 起点 125→89→53）。
+ * 两条路都走不通，说明 9 个超出了底部悬浮栏的容量 —— 主流 App 同量级是
+ * 4~5 个。故收到 5 个：栏内每格 ≈221px，文字宽裕且完全静止。
+ *
+ * NAV_ITEMS 里的其余页面从「更多」进入，功能一个不少。
+ */
+const BAR_ITEMS: NavItem[] = [
+  { id: 'home', label: '连接' },
+  { id: 'nodes', label: '节点' },
+  { id: 'visual', label: '视觉' },
+  { id: 'settings', label: '设置' },
+  { id: 'more', label: '更多' }
+];
+
 @Entry
 @Component
 struct Index {
@@ -274,16 +295,16 @@ struct Index {
       // 底部悬浮沉浸光感页签栏（HdsTabs）：内容从栏下滑过（barOverlap），
       // 材质按设备算力自适应（ADAPTIVE），与商店里主流 App 的形态一致。
       //
+      // 栏内只放 BAR_ITEMS 的 5 个主入口（其余页面走「更多」）。
+      //
       // scrollable(false) 是刻意的：页内已有大量手势（节点列表、3D 视图的
       // PanGesture 旋转），开启左右滑动切页会与之抢手势，导致 3D 转不动。
-      // 9 个入口靠 barMode(Fixed) 等分栏宽一次性排开（见下方说明），
-      // 不需要横向滚动 —— 而横向滚动恰恰会让标签跟着动。
       // barPosition 必须写在构造参数里：HDS_tabs 从 options 读取它，
       // 走 `.barPosition()` 属性设置器会报
       //   HDS_tabs: GetTabBarPosition barPosition is not a number
       // 实测结果：写在属性上时底部栏位置退回默认值，不是我们要的 End。
       HdsTabs({ index: this.navIndex, controller: this.tabsCtrl, barPosition: BarPosition.End }) {
-        ForEach(this.navItems(), (item: NavItem) => {
+        ForEach(this.barItems(), (item: NavItem) => {
           TabContent() {
             this.pageFor(item.id)
           }
@@ -292,21 +313,11 @@ struct Index {
       }
       .layoutWeight(1)
       .width('100%')
-      // barMode 必须用 Fixed，不能用 Scrollable。
+      // barMode 用 Fixed：5 个页签等分栏宽、永不滚动。
       //
-      // Scrollable 会让栏自动滚动以居中当前页签，滚动偏移一变，**全部标签
-      // 跟着整体位移** —— 就是用户反馈的「底部沉浸光感的字跟着动」。
-      // 真机实测证据（uitest dumpLayout，切页签后对比标签 x 坐标）：
-      //   TabBar 外框始终 [58,2493][1166,2682] 不动，但标签起点随选中项漂移：
-      //     连接/视觉/节点 → 125,247,369...
-      //     规则           →  89,211,333...   （-36）
-      //     应用/设置       →  53,175,297...   （-72）
-      // 外框不动而内容动，所以这不是 adaptToHandedness 造成的（那项已回退）。
-      //
-      // Fixed 让 9 个页签等分栏宽、永不滚动：栏宽 1108px / 9 ≈ 123px 每格，
-      // 标签最长 3 字（fontSize 12）远小于格宽，不会截断。
-      // 页内左右滑动切页仍由 scrollable(false) 关闭（避免与 3D 手势抢），
-      // 两者互不相关。
+      // 与 Scrollable 的取舍见 BAR_ITEMS 注释：Scrollable 会为居中当前页签
+      // 自动滚动而拖走全部标签；Fixed 配 9 个又会把文字压成「…」。
+      // 减到 5 个后 Fixed 两难皆无：文字宽裕且完全静止。
       .barMode(BarMode.Fixed)
       .scrollable(false)
       .barHeight(56)
@@ -323,7 +334,7 @@ struct Index {
       // 悬浮胶囊左右各内缩约 58px，底部留白，形态与主流 App 一致。
       .barFloatingStyle(this.buildBarFloatingStyle())
       .onChange((index: number) => {
-        const items: NavItem[] = this.navItems();
+        const items: NavItem[] = this.barItems();
         if (index >= 0 && index < items.length) {
           this.selectedPage = items[index].id;
           this.statusMessage = '';
@@ -411,14 +422,19 @@ struct Index {
     }
   }
 
+  /**
+   * selectedPage → 底部栏索引。
+   *
+   * 栏内没有的页面（实时连接/规则/DNS/应用/诊断/首次配置）统一归到「更多」
+   * 那一格，这样从「更多」进入子页面时栏的高亮不会乱跳。
+   */
   private indexOfPage(id: string): number {
-    const items: NavItem[] = this.navItems();
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].id === id) {
+    for (let i = 0; i < BAR_ITEMS.length; i++) {
+      if (BAR_ITEMS[i].id === id) {
         return i;
       }
     }
-    return 0;
+    return BAR_ITEMS.length - 1;
   }
 
   @Builder
@@ -646,6 +662,8 @@ struct Index {
           this.statusMessage = '诊断记录已清空';
         }
       })
+    } else if (id === 'more') {
+      this.morePage()
     } else if (id === 'settings') {
       SettingsPage({
         subscriptions: this.subProfiles,
@@ -692,11 +710,72 @@ struct Index {
     }
   }
 
-  private navItems(): NavItem[] {
-    if (this.onboardingDone) {
-      return NAV_ITEMS.filter((item: NavItem) => item.id !== 'onboard');
+  /** 「更多」页：列出不在底部栏里的页面，点击即切过去 */
+  @Builder
+  private morePage() {
+    Scroll() {
+      Column({ space: 8 }) {
+        Text('更多功能')
+          .fontSize(14)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text'))
+          .width('100%')
+          .margin({ bottom: 4 })
+        ForEach(this.moreItems(), (item: NavItem) => {
+          Row({ space: 10 }) {
+            Text(item.label)
+              .fontSize(13)
+              .fontColor($r('app.color.text'))
+            Blank()
+            Text('>')
+              .fontSize(13)
+              .fontColor($r('app.color.muted'))
+          }
+          .width('100%')
+          .height(48)
+          .padding({ left: 14, right: 14 })
+          .borderRadius(8)
+          .backgroundColor($r('app.color.surface'))
+          .border({ width: 1, color: $r('app.color.line_soft') })
+          .onClick(() => {
+            // 切页后由 pageFor 重渲染；栏高亮停在「更多」（见 indexOfPage）
+            this.selectedPage = item.id;
+            this.statusMessage = '';
+          })
+        }, (item: NavItem) => item.id)
+      }
+      .width('100%')
+      .padding({ left: 20, right: 20, top: 12, bottom: 180 })
     }
-    return NAV_ITEMS;
+    .width('100%')
+    .height('100%')
+    .scrollBar(BarState.Off)
+  }
+
+  /** 底部栏的 5 个入口（固定，不随 onboarding 变化） */
+  private barItems(): NavItem[] {
+    return BAR_ITEMS;
+  }
+
+  /** 「更多」页里列出的非栏内页面 */
+  private moreItems(): NavItem[] {
+    const out: NavItem[] = [];
+    for (let i = 0; i < NAV_ITEMS.length; i++) {
+      const it: NavItem = NAV_ITEMS[i];
+      if (it.id === 'onboard' && this.onboardingDone) {
+        continue;
+      }
+      let inBar: boolean = false;
+      for (let j = 0; j < BAR_ITEMS.length; j++) {
+        if (BAR_ITEMS[j].id === it.id) {
+          inBar = true;
+        }
+      }
+      if (!inBar) {
+        out.push(it);
+      }
+    }
+    return out;
   }
 
   private pageTitle(): string {
