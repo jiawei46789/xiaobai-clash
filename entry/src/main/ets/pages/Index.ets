@@ -225,6 +225,14 @@ struct Index {
   private lastAutoRestartAt: number = 0;
 
   /**
+   * 心跳消失后自动重连的连续尝试次数。
+   *
+   * 连接成功后清零；超过上限即停止自动恢复并提示手动连接 —— 隧道真的不可用时
+   * （账号到期、节点全挂等）无限重连只会耗电并刷屏。
+   */
+  private autoRestartCount: number = 0;
+
+  /**
    * 页面进入后台/锁屏的时刻（毫秒）；0 表示当前在前台。
    */
   private hiddenAt: number = 0;
@@ -663,7 +671,14 @@ struct Index {
         }
       })
     } else if (id === 'more') {
-      this.morePage()
+      // 「更多」这一格的 TabContent 是常驻的，内容要按 selectedPage 分流：
+      // 点列表项只改 selectedPage，而当前可见的仍是本格，若这里永远渲染
+      // morePage()，列表就会「点了没反应」（选中页变了但画面不动）。
+      if (this.selectedPage === 'more') {
+        this.morePage()
+      } else {
+        this.pageFor(this.selectedPage)
+      }
     } else if (id === 'settings') {
       SettingsPage({
         subscriptions: this.subProfiles,
@@ -1446,11 +1461,17 @@ struct Index {
       this.connected = true;
       return;
     }
-    hilog.warn(DOMAIN, TAG, 'heartbeat stale and system vpn gone; restarting');
+    hilog.warn(DOMAIN, TAG, 'heartbeat stale and system vpn gone; will auto-recover');
     this.connected = false;
     this.sessionStart = 0;
     this.clearLiveStats();
-    this.pushEvent('隧道已中断', '连接已失效，请手动点击连接', 'warn');
+    // 心跳断了、系统里 VPN 也没了 → 主动重建，而不是丢回给用户。
+    //
+    // 调用方 refreshCoreStatus 已按 wantConnected 把关：能走到这里说明用户的
+    // 意图仍是「保持连接」（他不是手动断开的那一方）。此前这里只推一条
+    // 「请手动点击连接」就结束，观感就是「用着用着自动关了，还得手动点」——
+    // 即本轮反馈的「会自动关闭」。autoRestartTunnel 自带 60s 节流与次数上限。
+    await this.autoRestartTunnel();
   }
 
   private async autoRestartTunnel(): Promise<void> {
@@ -1465,6 +1486,10 @@ struct Index {
     if (active === null || active === undefined) {
       return;
     }
+    if (this.autoRestartCount >= 5) {
+      this.pushEvent('隧道已中断', '自动恢复多次未成功，请手动点击连接', 'warn');
+      return;
+    }
     // 节流时刻只在「确实要发起一次尝试」时才消费。
     //
     // 原来它在上面两处守卫之前就写入了：没有订阅时直接 return、或 connecting
@@ -1472,11 +1497,12 @@ struct Index {
     // 重连」的观感。移到守卫之后、toggleVpn() 之前，保证每一次被消耗的配额
     // 都对应一次真实的重连发起。
     this.lastAutoRestartAt = now;
+    this.autoRestartCount++;
     // 这条 hilog 是刻意保留的：它与 autoConnectOnLaunch() 的启动自动连接
     // 走的是同一个 toggleVpn()，仅靠结果无法区分是谁触发的恢复。
     // 排查「隧道断了但没恢复」时，需要靠它判断意图持久化那条路径是否生效。
-    hilog.info(DOMAIN, TAG, 'auto-restart tunnel after heartbeat loss');
-    this.pushEvent('隧道已中断', '正在自动恢复连接', 'warn');
+    hilog.info(DOMAIN, TAG, 'auto-restart tunnel after heartbeat loss, attempt %{public}d', this.autoRestartCount);
+    this.pushEvent('隧道已中断', '正在自动恢复连接（第 ' + this.autoRestartCount + ' 次）', 'warn');
     await this.toggleVpn();
   }
 
@@ -1570,6 +1596,8 @@ struct Index {
       // connected 翻回 false 并重复发起一次启动。表现为「重连成功后界面
       // 闪回未连接」。
       this.lastStopAt = 0;
+      // 连接成功 → 清零自动恢复计数，让下一次断线仍能自动恢复
+      this.autoRestartCount = 0;
       // 记录用户意图：进程被杀后重开时，靠它判断「应该自动恢复连接」，
       // 而不是依赖 connected（新进程里它必然是 false）。
       this.settingsStore?.saveWantConnected(true);

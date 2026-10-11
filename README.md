@@ -20,6 +20,7 @@ HarmonyOS NEXT 原生 Clash/Mihomo VPN 客户端（HAP），在 [LIAN CONNECT](h
 | 小艺智能体（InsightIntent） | `@InsightIntentEntry` 将「连接/断开加速」注册为系统意图 `ControlVpn`（ToolsDomain，foreground 模式，含 llmDescription/keywords 供大模型理解）。意图执行器不直接操作 VPN，而是通过 AppStorage 信箱把动作交给主界面走既有 `toggleVpn()` 链路，保持「VPN 只有一个开关入口」；连接类动作仍需用户点按确认（符合纯手动开关约束） |
 | 订阅下载链路修复 | 修复导入订阅报 403/下载失败：① 真实错误码不再被吞（HarmonyOS `BusinessError` 不是 `Error` 实例，旧代码 `String(err)` 只得到 `[object Object]`），现在直接报出如 `2300999` + 人话提示；② 新增**内核本地代理兜底**：直连被 SNI 重置（大陆访问 Cloudflare 前置的机场域名常见）时，自动改走 mihomo 本地混合端口 `127.0.0.1:7890` 重试；③ 网络层错误不再拿 10 个 UA 各等 30 秒（导入可能卡死几分钟），立刻切链路；④ 仍保留 UA 回退链应对面板 WAF 挑客户端导致的真 403/406/451 |
 | 底部悬浮沉浸光感导航栏 | 外壳重构为商店主流 App 形态：`HdsTabs` 底部悬浮磨砂胶囊（`barFloatingStyle.systemMaterialEffect` = `hdsMaterial` ADAPTIVE，按设备算力自适应）+ `barOverlap(true)` 让内容从栏下滑过 + 标题栏 `backgroundBlurStyle` 磨砂并浮在内容之上；底部栏只放 5 个主入口（连接/节点/视觉/设置/更多，`barMode(Fixed)`），其余页面走「更多」页。⚠️ **底部栏容量上限**：9 个页签时 Fixed 把每格压到 ~123px，文字退化成「…」（用户反馈「字看不到，只有点」）；Scrollable 则不截断却会为居中当前页签自动滚动，拖走全部标签（实测 x 起点 125→89→53）。5 个 ≈221px/格，静止且文字宽裕。⚠️ `.systemMaterial()` 只在导航标题栏组件/TabBar 内生效，挂普通容器上会被运行时判 inert（`Ace: Material inactive: out of scope.`）—— 普通容器请用 `backgroundBlurStyle`。详见 `docs/CAPABILITIES-API26.md` |
+| 心跳监测 + 断线自动恢复 | 主进程每秒读 VPN 扩展写的核心心跳（6s 陈旧阈值）；心跳断且系统 VPN 也没了时，改为 `autoRestartTunnel()` **自动重建**（此前只提示「请手动点击连接」——即用户反馈的「用着用着自动关了」）。带 60s 节流与连续 5 次上限，成功后清零，隧道真不可用时不会无限重连 |
 | API 26 + 能力依赖/权限声明 | `compatibleSdkVersion` 升至 `26.0.0`；为视觉 AI / 3DGS / 沉浸光感 / 互动卡片 / 闪控窗 五类能力补齐权限声明（CAMERA / ACCELEROMETER / GYROSCOPE / VIBRATE）；映射与限制见 `docs/CAPABILITIES-API26.md` |
 
 ## 构建
