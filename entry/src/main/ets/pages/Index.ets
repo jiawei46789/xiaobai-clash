@@ -1,4 +1,9 @@
 import { common, ConfigurationConstant, bundleManager } from '@kit.AbilityKit';
+import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
+// 只取默认导出。注意 WantAgent / WantAgentInfo 都不在命名空间内，
+// 也无法从该模块具名导入（实测 'has no exported member named WantAgentInfo'），
+// 所以运行时**不写类型标注**，让 getWantAgent() 的参数上下文去推断。
+import wantAgent from '@ohos.app.ability.wantAgent';
 import { uiMaterial } from '@kit.ArkUI';
 import {
   HdsTabs,
@@ -1556,6 +1561,54 @@ struct Index {
    * autoRestartTunnel 全都以它为前置守卫，界面会彻底失去响应，只能重启应用。
    * 用 try/finally 把这个约束变成结构性保证，而不是靠每处记得写。
    */
+  /**
+   * 申请「长时任务」（continuous task）—— 防止息屏/切后台后整个进程被系统回收。
+   *
+   * 为什么必须做：用户反馈「切后台或息屏后 App 被系统杀掉」。本工程原先只有
+   * 心跳监测，而心跳只能**发现**隧道已经断了，救不回被回收的进程；
+   * HarmonyOS 的正规做法是申请长时任务，系统据此保留进程并常驻一条通知。
+   *
+   * BackgroundMode 没有 VPN 专用项，取 DATA_TRANSFER（网络数据传输），
+   * 语义最贴近；对应的 KEEP_BACKGROUND_RUNNING 是 normal 级系统授权，
+   * 已在 module.json5 声明，无需运行时弹窗。
+   *
+   * 失败只记日志、不打断连接流程 —— 拿不到长时任务最多是被回收概率高一些，
+   * 不该因此让用户连不上。
+   */
+  private async startKeepAlive(): Promise<void> {
+    try {
+      const ctx = this.getAbilityContext();
+      // 字面量直接作为实参传入，靠 getWantAgent 的签名做上下文类型推断：
+      // 既避开了「该模块不导出 WantAgentInfo」，也避开 arkts-no-untyped-obj-literals。
+      const agent = await wantAgent.getWantAgent({
+        wants: [{
+          bundleName: 'com.xiaobai.clash',
+          abilityName: 'EntryAbility'
+        }],
+        actionType: wantAgent.OperationType.START_ABILITY,
+        requestCode: 0,
+        actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
+      });
+      await backgroundTaskManager.startBackgroundRunning(ctx,
+        backgroundTaskManager.BackgroundMode.DATA_TRANSFER, agent);
+      hilog.info(DOMAIN, TAG, 'background continuous task started');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'unknown';
+      hilog.warn(DOMAIN, TAG, 'startBackgroundRunning failed: %{public}s', msg);
+    }
+  }
+
+  /** 断开连接时释放长时任务，避免白占通知位 */
+  private async stopKeepAlive(): Promise<void> {
+    try {
+      await backgroundTaskManager.stopBackgroundRunning(this.getAbilityContext());
+      hilog.info(DOMAIN, TAG, 'background continuous task stopped');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'unknown';
+      hilog.warn(DOMAIN, TAG, 'stopBackgroundRunning failed: %{public}s', msg);
+    }
+  }
+
   private async toggleVpn(): Promise<void> {
     try {
       await this.toggleVpnInternal();
@@ -1584,6 +1637,7 @@ struct Index {
         this.clearStatsOnDisconnect();
         this.sessionStart = 0;
         this.statusMessage = 'VPN 已断开';
+        this.stopKeepAlive();
         this.pushEvent('VPN 已断开', '隧道已关闭，网络恢复直连', 'info');
       } else {
         this.statusMessage = result.error ?? 'VPN 停止失败';
@@ -1651,6 +1705,8 @@ struct Index {
       // 测速选出的其它地区」。此前 requestSelectNode 只在用户点击节点时
       // 调用一次，连接/重连路径从未下发，所以每次重连都会丢选择。
       this.applySavedNodeSelection();
+      // 申请长时任务：防止息屏/切后台后进程被系统回收
+      this.startKeepAlive();
       this.pushEvent('VPN 已连接', '出口节点 ' + this.selectedNode, 'ok');
     } else {
       this.statusMessage = result.error ?? 'VPN 启动失败';

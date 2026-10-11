@@ -86,6 +86,20 @@
           ],
           "when": "always"
         }
+      },
+      // 长时任务（continuous task）：VPN 需要常驻后台，否则息屏/切后台后
+      // 整个进程会被系统回收 —— 用户反馈的「App 会被自动杀掉」。
+      // KEEP_BACKGROUND_RUNNING 是 system_grant + normal，装机即生效、
+      // 不会像 FLOAT_VIEW 那样触发 grant 校验失败。
+      {
+        "name": "ohos.permission.KEEP_BACKGROUND_RUNNING",
+        "reason": "$string:perm_keep_bg",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "always"
+        }
       }
       // 闪控窗（@ohos.window.floatView）/ 闪控球（floatingBall，HarmonyOS 7 / API 26）：
       // 对应权限 FLOAT_VIEW（user_grant, system_basic）与 USE_FLOAT_BALL（system_grant, system_basic）
@@ -104,6 +118,11 @@
         "label": "$string:EntryAbility_label",
         "startWindowIcon": "$media:startIcon",
         "startWindowBackground": "$color:start_window_background",
+        // 长时任务类型：BackgroundMode 没有 VPN 专用项，取 dataTransfer
+        // （网络数据传输）语义最贴近；声明后才能在运行期申请常驻。
+        "backgroundModes": [
+          "dataTransfer"
+        ],
         "exported": true,
         "skills": [
           {

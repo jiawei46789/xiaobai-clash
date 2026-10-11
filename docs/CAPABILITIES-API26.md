@@ -456,7 +456,12 @@ Get-ChildItem "$SDK\openharmony\ets\build-tools\ets-loader\declarations" -Filter
 5. **UI 改完要用「用户能看到什么」验收**，不只是「日志干净 + 坐标稳定」。1.6.28 我验证了
    坐标静止，却没验证**文字是否可读**，于是漏掉了「…」截断 —— 又一次用错了判据。
 
-## 十、1.6.30：「更多」打不开 + 心跳自动恢复
+## 十、1.6.30：「更多」打不开 + 心跳自动恢复（含 1.6.31 返回条）
+
+> 1.6.31 补充：从「更多」进入子页后，顶部加一条 `moreBackBar()`（`< 返回`），
+> 点击把 `selectedPage` 改回 `'more'` 即回到列表。此前回列表只能再去点底部那颗
+> 已高亮为「更多」的页签，不直观。子页用 `Column{返回条, Column{子页}.layoutWeight(1)}`
+> 包裹，保证子页在剩余高度内滚动。真机验证：更多→规则→返回条出现→点返回→列表回归 ✓
 
 ### ❌「更多」里的项点了没反应（1.6.29 引入）
 
@@ -487,3 +492,37 @@ Get-ChildItem "$SDK\openharmony\ets\build-tools\ets-loader\declarations" -Filter
   `kill -9 <vpn ext pid>` 被拒（`Operation not permitted`），无法从外部杀掉应用沙箱
   （uid 20020416）内的 VPN 扩展进程来模拟隧道丢失。需 root，或由用户在实际断线场景观察。
 - 无回归：VPN 连接正常（扩展进程存活、`vpn data plane active`、节点测速正常轮转）。
+
+## 十一、1.6.32：长时任务（防息屏/切后台被系统回收）
+
+用户澄清：所谓「心跳监测防止自动关闭」指的是**整个 App 在切后台/息屏后被系统杀掉**，
+不是隧道自己断。心跳救不了被回收的进程（它只能发现「已经断了」），正解是申请 HarmonyOS
+的**长时任务**（continuous task）—— 系统据此保留进程并常驻一条通知。
+
+### 实现
+
+- `module.json5`：声明 `ohos.permission.KEEP_BACKGROUND_RUNNING`
+  （**system_grant + normal**，装机即授予，不会像 FLOAT_VIEW 那样触发 grant 校验失败）；
+  并给 EntryAbility 加 `"backgroundModes": ["dataTransfer"]`。
+- `Index.ets`：连接成功后 `backgroundTaskManager.startBackgroundRunning(ctx,
+  BackgroundMode.DATA_TRANSFER, wantAgent)`；断开时 `stopBackgroundRunning()`。
+  失败只记日志、不打断连接流程（拿不到长时任务最多是被回收概率高些，不该让人连不上）。
+
+### 踩坑
+
+1. `BackgroundMode` **没有 VPN 专用项**（可选：DATA_TRANSFER / AUDIO_PLAYBACK / LOCATION /
+   VOIP / TASK_KEEPING 等），取 `DATA_TRANSFER`（网络数据传输）语义最近。
+2. `WantAgent` / `WantAgentInfo` 都是 `@ohos.app.ability.wantAgent` 的**模块级**导出：
+   既不能写 `wantAgent.WantAgent`（报 has no exported member named 'WantAgent'），
+   也无法具名导入 `WantAgentInfo`（实测同报不存在）。最终**不写类型标注**，把字面量
+   直接作为实参传给 `getWantAgent()`，靠函数签名的上下文推断 —— 同时避开了
+   `arkts-no-untyped-obj-literals`。
+
+### 真机验证（MIA-AL00 · API 26 · HarmonyOS 7.0.0.109）
+
+| 检查项 | 结果 |
+|---|---|
+| `bm dump` 中 KEEP_BACKGROUND_RUNNING | 已授予 |
+| 连接后日志 | `LianIndex: background continuous task started` ✓ |
+| 按 Home 切后台 75 秒后进程 pid | **不变**（23856，未被回收） |
+| 切后台后 VPN 扩展进程 | 仍在（`com.xiaobai.clash:vpn`） |

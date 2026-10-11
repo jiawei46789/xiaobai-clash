@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.xiaobai.clash",
     "vendor": "lian",
-    "versionCode": 106031,
-    "versionName": "1.6.31",
+    "versionCode": 106032,
+    "versionName": "1.6.32",
     "icon": "$media:layered_image",
     "label": "$string:app_name"
   }
