@@ -677,7 +677,18 @@ struct Index {
       if (this.selectedPage === 'more') {
         this.morePage()
       } else {
-        this.pageFor(this.selectedPage)
+        // 进入子页后顶部给一条返回条：点它回到「更多」列表。
+        // 否则用户只能去点底部那颗（已高亮为）「更多」的页签，不直观。
+        Column() {
+          this.moreBackBar()
+          Column() {
+            this.pageFor(this.selectedPage)
+          }
+          .layoutWeight(1)
+          .width('100%')
+        }
+        .width('100%')
+        .height('100%')
       }
     } else if (id === 'settings') {
       SettingsPage({
@@ -723,6 +734,33 @@ struct Index {
         }
       })
     }
+  }
+
+  /**
+   * 从「更多」进入子页时顶部的返回条。
+   *
+   * 只是把 selectedPage 改回 'more'；因为「更多」那一格是常驻 TabContent，
+   * 改回去后它会重新渲染列表（见 pageFor 的 more 分支）。
+   */
+  @Builder
+  private moreBackBar() {
+    Row({ space: 6 }) {
+      Text('<')
+        .fontSize(16)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.blue'))
+      Text('返回')
+        .fontSize(13)
+        .fontColor($r('app.color.blue'))
+      Blank()
+    }
+    .width('100%')
+    .height(44)
+    .padding({ left: 20, right: 20 })
+    .onClick(() => {
+      this.selectedPage = 'more';
+      this.statusMessage = '';
+    })
   }
 
   /** 「更多」页：列出不在底部栏里的页面，点击即切过去 */
