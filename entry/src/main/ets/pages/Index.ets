@@ -787,6 +787,11 @@ struct Index {
         return NAV_ITEMS[i].label;
       }
     }
+    // 「更多」不在 NAV_ITEMS 里（它只是底部栏的一格），单独给标题；
+    // 否则会掉到下面的兜底值，页头错误显示成「连接」。
+    if (this.selectedPage === 'more') {
+      return '更多';
+    }
     return '连接';
   }
 
